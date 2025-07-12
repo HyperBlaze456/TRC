@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/DAC-JAX" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/chatterbox_pytorch" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/s3tokenizer/S3Tokenizer" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/s3tokenizer/SenseVoice" vcs="Git" />
+  </component>
+</project>
