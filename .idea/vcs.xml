@@ -5,5 +5,6 @@
     <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/chatterbox_pytorch" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/s3tokenizer/S3Tokenizer" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/../../AudioAI/my_tts/references/s3tokenizer/SenseVoice" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
   </component>
 </project>

@@ -2,49 +2,9 @@ import jax.numpy as jnp
 from flax import nnx
 from typing import List, Tuple, Optional
 
-# -----------------------------------------------------
-# Helper functions
-# -----------------------------------------------------
-
-_state_axes = nnx.StateAxes({nnx.Param: 0, nnx.BatchStat: 0})
-
-def _build_disc_stack(rngs: nnx.Rngs,
-                      num_resolutions: int,
-                      channels: List[int],
-                      kernel_size: Tuple[int, int],
-                      strides: Tuple[int, int],
-                      padding: str):
-    """Create a stack of independent discriminators along axis‑0."""
-
-    @nnx.split_rngs(splits=num_resolutions)
-    @nnx.vmap  # axis‑0
-    def _factory(r):
-        return STFTResolutionDiscriminator(
-            channels=channels,
-            kernel_size=kernel_size,
-            strides=strides,
-            padding=padding,
-            rngs=r,
-        )
-
-    return _factory(rngs)  # → [R, …]
-
-
-def _apply_disc_stack(disc_stack, feats, *, training: bool):
-    """Vectorised discriminator forward pass (no kwarg leakage to vmap)."""
-
-    @nnx.vmap(in_axes=(_state_axes, 0), out_axes=0)
-    def _apply(disc, feat):  # (disc, feat) slice
-        return disc(feat, training=training)
-
-    return _apply(disc_stack, feats)  # [R, B, 1]
-
-# -----------------------------------------------------
-# Core modules
-# -----------------------------------------------------
 
 class STFTDiscriminator(nnx.Module):
-    """Multi‑resolution STFT discriminator with vmap‑parallel branches."""
+    """Multi-resolution STFT discriminator. Proposed from SoundStream, used in DAC too."""
 
     def __init__(self,
                  fft_sizes: List[int] = (2048, 1024, 512),
@@ -58,23 +18,20 @@ class STFTDiscriminator(nnx.Module):
         if rngs is None:
             rngs = nnx.Rngs(0)
 
-        self.fft_sizes   = list(fft_sizes)
+        self.fft_sizes = list(fft_sizes)
         self.hop_lengths = hop_lengths or [n // 4 for n in self.fft_sizes]
         self.win_lengths = win_lengths or self.fft_sizes
-        self.num_res     = len(self.fft_sizes)
 
-        self._disc_stack = _build_disc_stack(
-            rngs,
-            self.num_res,
-            channels,
-            kernel_size,
-            strides,
-            padding,
-        )
-
-    # -------------------------------------------------
-    # STFT utilities
-    # -------------------------------------------------
+        self.discriminators = []
+        for _ in range(len(self.fft_sizes)):
+            disc = STFTResolutionDiscriminator(
+                channels=channels,
+                kernel_size=kernel_size,
+                strides=strides,
+                padding=padding,
+                rngs=rngs
+            )
+            self.discriminators.append(disc)
 
     def _stft(self,
               x: jnp.ndarray,
@@ -96,7 +53,7 @@ class STFTDiscriminator(nnx.Module):
         frames = x[:, idx] * window
 
         spec = jnp.fft.rfft(frames, n=fft_size, axis=-1)
-        return jnp.transpose(spec, (0, 2, 1))
+        return spec
 
     def _pad_to_max(self, feats: List[jnp.ndarray]) -> jnp.ndarray:
         """Zero‑pad each [B, 2, F, T] to common size and stack on axis‑0."""
@@ -107,29 +64,29 @@ class STFTDiscriminator(nnx.Module):
                            (0, f_max - f.shape[2]),
                            (0, t_max - f.shape[3])))
                   for f in feats]
-        return jnp.stack(padded, 0)  # [R, B, 2, F*, T*]
-
-    # -------------------------------------------------
-    # Forward pass
-    # -------------------------------------------------
+        return jnp.stack(padded, 0)
 
     def __call__(self, x: jnp.ndarray, *, training: bool = True):
-        feats = []
-        for fft, hop, win in zip(self.fft_sizes,
-                                 self.hop_lengths,
-                                 self.win_lengths):
-            spec = self._stft(x, fft, hop, win)
-            feats.append(jnp.stack([jnp.abs(spec), jnp.angle(spec)], 1))
+        outputs = []
 
-        feats = self._pad_to_max(feats)                  # [R, B, 2, F*, T*]
-        outs  = _apply_disc_stack(self._disc_stack,
-                                  feats,
-                                  training=training)   # [R, B, 1]
-        return jnp.squeeze(outs, -1)                     # [R, B]
+        for i, (fft, hop, win) in enumerate(zip(self.fft_sizes,
+                                                self.hop_lengths,
+                                                self.win_lengths)):
+            # Compute STFT
+            spec = self._stft(x, fft, hop, win)
+
+            # Stack magnitude and phase
+            feat = jnp.stack([jnp.abs(spec), jnp.angle(spec)], -1)  # [B, T_f, F, 2]
+
+            # Apply discriminator
+            out = self.discriminators[i](feat, training=training)  # [B]
+            outputs.append(out)
+
+        return jnp.stack(outputs, 0)  # [R, B]
 
 
 class STFTResolutionDiscriminator(nnx.Module):
-    """2‑D Conv discriminator for a single STFT resolution."""
+    """2D Conv discriminator for a single STFT resolution (no batch norm)."""
 
     def __init__(self,
                  channels: List[int],
@@ -137,17 +94,16 @@ class STFTResolutionDiscriminator(nnx.Module):
                  strides: Tuple[int, int],
                  padding: str,
                  rngs: nnx.Rngs):
-        self.blocks = []
-        c_in = 2
-        for i, c_out in enumerate(channels):
-            self.blocks.append({
-                "conv": nnx.Conv(c_in, c_out,
-                                 kernel_size=kernel_size,
-                                 strides=strides,
-                                 padding=padding,
-                                 rngs=rngs),
-                "bn":   None if i == 0 else nnx.BatchNorm(c_out, rngs=rngs),
-            })
+        self.convs = []
+        c_in = 2  # magnitude and phase channels
+
+        for c_out in channels:
+            conv = nnx.Conv(c_in, c_out,
+                            kernel_size=kernel_size,
+                            strides=strides,
+                            padding=padding,
+                            rngs=rngs)
+            self.convs.append(conv)
             c_in = c_out
 
         self.out_conv = nnx.Conv(c_in, 1,
@@ -157,13 +113,15 @@ class STFTResolutionDiscriminator(nnx.Module):
                                  rngs=rngs)
 
     def __call__(self, x: jnp.ndarray, *, training: bool) -> jnp.ndarray:
-        x = jnp.transpose(x, (0, 2, 3, 1))
-        for blk in self.blocks:
-            x = blk["conv"](x)
-            if blk["bn"] is not None:
-                x = blk["bn"](x, use_running_average=not training)
+        # Input must be in the shape of [B, T_f, F, 2]. That 2 is the channel.
+        # Apply conv layers with ELU activation
+        for conv in self.convs:
+            x = conv(x)
             x = nnx.elu(x)
 
+        # Final conv to single channel
         x = self.out_conv(x)
+
+        # Global average pooling
         x = jnp.mean(x, axis=(1, 2))
-        return x
+        return jnp.squeeze(x, -1)  # [B]
