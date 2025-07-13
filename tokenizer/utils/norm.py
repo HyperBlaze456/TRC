@@ -42,3 +42,6 @@ class AdaRMSZero(nnx.Module):
                 gate = jnp.expand_dims(gate, axis=1)
         normalized = self.norm(x)
         return normalized * scale, gate # no shift, but have to scale.
+
+class WeightNorm(nnx.Module):
+    pass # I have ideas... but need to see more about how nnx module works!

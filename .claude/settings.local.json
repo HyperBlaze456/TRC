@@ -3,7 +3,9 @@
     "allow": [
       "Bash(source:*)",
       "Bash(python test:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:arxiv.org)"
     ],
     "deny": []
   }
