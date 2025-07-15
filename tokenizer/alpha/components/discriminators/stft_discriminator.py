@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from flax import nnx
 from typing import List, Tuple, Optional
@@ -34,10 +35,10 @@ class STFTDiscriminator(nnx.Module):
             self.discriminators.append(disc)
 
     def _stft(self,
-              x: jnp.ndarray,
+              x: jax.Array,
               fft_size: int,
               hop: int,
-              win: int) -> jnp.ndarray:
+              win: int) -> jax.Array:
         """Return complex STFT with shape [B, F, T_f]."""
         if x.ndim == 3:
             x = jnp.squeeze(x, -1)  # [B, T]
@@ -55,7 +56,7 @@ class STFTDiscriminator(nnx.Module):
         spec = jnp.fft.rfft(frames, n=fft_size, axis=-1)
         return spec
 
-    def _pad_to_max(self, feats: List[jnp.ndarray]) -> jnp.ndarray:
+    def _pad_to_max(self, feats: List[jax.Array]) -> jax.Array:
         """Zero‑pad each [B, 2, F, T] to common size and stack on axis‑0."""
         f_max = max(t.shape[2] for t in feats)
         t_max = max(t.shape[3] for t in feats)
@@ -66,7 +67,7 @@ class STFTDiscriminator(nnx.Module):
                   for f in feats]
         return jnp.stack(padded, 0)
 
-    def __call__(self, x: jnp.ndarray, *, training: bool = True):
+    def __call__(self, x: jax.Array, *, training: bool = True):
         outputs = []
 
         for i, (fft, hop, win) in enumerate(zip(self.fft_sizes,
@@ -112,7 +113,7 @@ class STFTResolutionDiscriminator(nnx.Module):
                                  padding=padding,
                                  rngs=rngs)
 
-    def __call__(self, x: jnp.ndarray, *, training: bool) -> jnp.ndarray:
+    def __call__(self, x: jax.Array, *, training: bool) -> jax.Array:
         # Input must be in the shape of [B, T_f, F, 2]. That 2 is the channel.
         # Apply conv layers with ELU activation
         for conv in self.convs:

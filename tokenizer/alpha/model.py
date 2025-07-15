@@ -1,5 +1,5 @@
 from flax import nnx
-import jax.numpy as jnp
+import jax
 
 from tokenizer.alpha.components.encoder import RawEncoder
 from tokenizer.alpha.components.quantizer import PhonemeBSQQuantizer
@@ -66,7 +66,7 @@ class AudioTokenizer(nnx.Module):
             output_48khz=decoder_output_48khz,
         )
     
-    def __call__(self, x: jnp.ndarray):
+    def __call__(self, x: jax.Array):
         """Forward pass through the tokenizer.
         
         Args:
@@ -89,7 +89,7 @@ class AudioTokenizer(nnx.Module):
         
         return reconstructed, phoneme_indices, acoustic_codes, encoder_output
     
-    def encode(self, x: jnp.ndarray):
+    def encode(self, x: jax.Array):
         """Encode audio to discrete tokens.
         
         Args:
@@ -107,7 +107,7 @@ class AudioTokenizer(nnx.Module):
         
         return phoneme_indices, acoustic_codes
     
-    def decode(self, phoneme_indices: jnp.ndarray, acoustic_codes: jnp.ndarray):
+    def decode(self, phoneme_indices: jax.Array, acoustic_codes: jax.Array):
         """Decode discrete tokens back to audio.
         
         Args:

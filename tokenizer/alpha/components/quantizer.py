@@ -99,11 +99,11 @@ class BinarySphericalQuantizer(nnx.Module):
         self.proj_sphere = nnx.Linear(input_dim, spherical_dim, rngs=rngs)
         self.sphere_restore = nnx.Linear(spherical_dim, input_dim, rngs=rngs)
         
-    def _normalize_to_sphere(self, x: jnp.ndarray) -> jnp.ndarray:
+    def _normalize_to_sphere(self, x: jax.Array) -> jax.Array:
         """Normalize vectors to unit hypersphere."""
         return x / (jnp.linalg.norm(x, axis=-1, keepdims=True) + 1e-8)
     
-    def _binary_quantize(self, x: jnp.ndarray):
+    def _binary_quantize(self, x: jax.Array):
         """Apply binary quantization with straight-through estimator.
         
         Returns:
@@ -124,7 +124,7 @@ class BinarySphericalQuantizer(nnx.Module):
         
         return quantized, codes
     
-    def encode(self, x: jnp.ndarray):
+    def encode(self, x: jax.Array):
         """Encode input to binary codes.
         
         Args:
@@ -145,7 +145,7 @@ class BinarySphericalQuantizer(nnx.Module):
         
         return codes, spherical_normalized
     
-    def decode(self, codes: jnp.ndarray) -> jnp.ndarray:
+    def decode(self, codes: jax.Array) -> jax.Array:
         """Decode binary codes back to embeddings.
         
         Args:
@@ -162,7 +162,7 @@ class BinarySphericalQuantizer(nnx.Module):
         
         return reconstructed
     
-    def __call__(self, x: jnp.ndarray):
+    def __call__(self, x: jax.Array):
         """Forward pass with quantization.
         
         Args:
@@ -229,7 +229,7 @@ class PhonemeBSQQuantizer(nnx.Module):
             use_straight_through=True
         )
     
-    def __call__(self, x: jnp.ndarray):
+    def __call__(self, x: jax.Array):
         """Forward pass with two-stage quantization.
         
         Args:
@@ -257,7 +257,7 @@ class PhonemeBSQQuantizer(nnx.Module):
         
         return reconstructed, phoneme_indices, acoustic_codes
     
-    def encode(self, x: jnp.ndarray):
+    def encode(self, x: jax.Array):
         """Encode input to discrete codes.
         
         Args:
@@ -276,7 +276,7 @@ class PhonemeBSQQuantizer(nnx.Module):
         
         return phoneme_indices, acoustic_codes
     
-    def decode(self, phoneme_indices: jnp.ndarray, acoustic_codes: jnp.ndarray):
+    def decode(self, phoneme_indices: jax.Array, acoustic_codes: jax.Array):
         """Decode discrete codes back to embeddings.
         
         Args:

@@ -53,7 +53,7 @@ class ConvDiscriminator(nnx.Module):
             rngs=rngs,
         )
     
-    def __call__(self, x: jnp.ndarray, training: bool = True) -> jnp.ndarray:
+    def __call__(self, x: jax.Array, training: bool = True) -> jax.Array:
         # x shape: [B, T, 1] (batch, time, channels)
         
         for i, block in enumerate(self.conv_blocks):

@@ -1,4 +1,4 @@
-import jax.numpy as jnp
+import jax
 from flax import nnx
 from typing import Optional
 from .embeddings import RotaryPositionalEmbedding
@@ -41,14 +41,14 @@ class MultiHeadAttentionWithBias(nnx.Module):
         
     def __call__(
         self,
-        query: jnp.ndarray,
-        key: Optional[jnp.ndarray] = None,
-        value: Optional[jnp.ndarray] = None,
-        mask: Optional[jnp.ndarray] = None,
-        q_bias: Optional[jnp.ndarray] = None,
-        k_bias: Optional[jnp.ndarray] = None,
+        query: jax.Array,
+        key: Optional[jax.Array] = None,
+        value: Optional[jax.Array] = None,
+        mask: Optional[jax.Array] = None,
+        q_bias: Optional[jax.Array] = None,
+        k_bias: Optional[jax.Array] = None,
         deterministic: bool = False
-    ) -> jnp.ndarray:
+    ) -> jax.Array:
         if key is None:
             key = query
         if value is None:
@@ -144,13 +144,13 @@ class MultiHeadAttentionWithRoPE(nnx.Module):
         
     def __call__(
         self,
-        query: jnp.ndarray,
-        key: Optional[jnp.ndarray] = None,
-        value: Optional[jnp.ndarray] = None,
-        mask: Optional[jnp.ndarray] = None,
+        query: jax.Array,
+        key: Optional[jax.Array] = None,
+        value: Optional[jax.Array] = None,
+        mask: Optional[jax.Array] = None,
         rope_cos_sin: Optional[tuple] = None,
         deterministic: bool = False
-    ) -> jnp.ndarray:
+    ) -> jax.Array:
         if key is None:
             key = query
         if value is None:

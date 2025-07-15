@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 from .dit import DiT
 
 
-def create_attention_mask(mask: jnp.ndarray, causal: bool = False) -> jnp.ndarray:
+def create_attention_mask(mask: jax.Array, causal: bool = False) -> jax.Array:
     """Convert padding mask to attention mask.
     
     Args:
@@ -49,21 +49,21 @@ class ConditionalCFM(nnx.Module):
         self.training_cfg_rate = training_cfg_rate
         self.inference_cfg_rate = inference_cfg_rate
         
-    def sample_time(self, key: jax.random.PRNGKey, shape: Tuple[int, ...]) -> jnp.ndarray:
+    def sample_time(self, key: jax.random.PRNGKey, shape: Tuple[int, ...]) -> jax.Array:
         """Sample time values with optional cosine scheduling."""
         t = jax.random.uniform(key, shape, minval=0.0, maxval=1.0)
         if self.t_scheduler == "cosine":
             t = 1 - jnp.cos(t * 0.5 * jnp.pi)
         return t
     
-    def get_time_schedule(self, n_timesteps: int) -> jnp.ndarray:
+    def get_time_schedule(self, n_timesteps: int) -> jax.Array:
         """Get time schedule for inference."""
         t_span = jnp.linspace(0, 1, n_timesteps + 1)
         if self.t_scheduler == "cosine":
             t_span = 1 - jnp.cos(t_span * 0.5 * jnp.pi)
         return t_span
     
-    def interpolate(self, x0: jnp.ndarray, x1: jnp.ndarray, t: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def interpolate(self, x0: jax.Array, x1: jax.Array, t: jax.Array) -> Tuple[jax.Array, jax.Array]:
         """Interpolate between noise and data for flow matching. We use linear interpolation for training
         
         Args:
@@ -132,13 +132,13 @@ class DiTCFM(ConditionalCFM):
         
     def compute_loss(
         self,
-        x1: jnp.ndarray,
-        mask: jnp.ndarray,
-        mu: jnp.ndarray,
+        x1: jax.Array,
+        mask: jax.Array,
+        mu: jax.Array,
         key: jax.random.PRNGKey,
-        spks: Optional[jnp.ndarray] = None,
-        cond: Optional[jnp.ndarray] = None,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        spks: Optional[jax.Array] = None,
+        cond: Optional[jax.Array] = None,
+    ) -> Tuple[jax.Array, jax.Array]:
         """Compute conditional flow matching loss.
         
         Args:
@@ -193,13 +193,13 @@ class DiTCFM(ConditionalCFM):
     
     def solve_euler(
         self,
-        x: jnp.ndarray,
-        t_span: jnp.ndarray,
-        mu: jnp.ndarray,
-        mask: jnp.ndarray,
-        spks: Optional[jnp.ndarray] = None,
-        cond: Optional[jnp.ndarray] = None,
-    ) -> jnp.ndarray:
+        x: jax.Array,
+        t_span: jax.Array,
+        mu: jax.Array,
+        mask: jax.Array,
+        spks: Optional[jax.Array] = None,
+        cond: Optional[jax.Array] = None,
+    ) -> jax.Array:
         """Solve ODE using Euler method.
         
         Args:
@@ -252,14 +252,14 @@ class DiTCFM(ConditionalCFM):
     
     def __call__(
         self,
-        mu: jnp.ndarray,
-        mask: jnp.ndarray,
+        mu: jax.Array,
+        mask: jax.Array,
         n_timesteps: int,
         key: jax.random.PRNGKey,
         temperature: float = 1.0,
-        spks: Optional[jnp.ndarray] = None,
-        cond: Optional[jnp.ndarray] = None,
-    ) -> jnp.ndarray:
+        spks: Optional[jax.Array] = None,
+        cond: Optional[jax.Array] = None,
+    ) -> jax.Array:
         """Generate samples using flow matching.
         
         Args:

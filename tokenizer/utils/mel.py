@@ -58,7 +58,7 @@ class MelSpectrogramJAX:
         self.window_func = self._get_window()
         self.mel_basis = self._create_mel_filterbank()
 
-    def _get_window(self) -> jnp.ndarray:
+    def _get_window(self) -> jax.Array:
         """Generate window function."""
         if self.window == 'hann':
             return jnp.hanning(self.win_length)
@@ -74,7 +74,7 @@ class MelSpectrogramJAX:
             raise ValueError(f"Unknown window type: {self.window}")
 
     @functools.partial(jit, static_argnums=(0,))
-    def hz_to_mel(self, frequencies: jnp.ndarray) -> jnp.ndarray:
+    def hz_to_mel(self, frequencies: jax.Array) -> jax.Array:
         """Convert Hz to Mel scale."""
         if self.htk:
             return 2595.0 * jnp.log10(1.0 + frequencies / 700.0)
@@ -94,7 +94,7 @@ class MelSpectrogramJAX:
             return mels
 
     @functools.partial(jit, static_argnums=(0,))
-    def mel_to_hz(self, mels: jnp.ndarray) -> jnp.ndarray:
+    def mel_to_hz(self, mels: jax.Array) -> jax.Array:
         """Convert Mel scale to Hz."""
         if self.htk:
             return 700.0 * (10.0**(mels / 2595.0) - 1.0)
@@ -113,7 +113,7 @@ class MelSpectrogramJAX:
             )
             return freqs
 
-    def _create_mel_filterbank(self) -> jnp.ndarray:
+    def _create_mel_filterbank(self) -> jax.Array:
         """Create Mel filterbank matrix."""
         # Frequency bins
         fft_freqs = jnp.linspace(0, self.sample_rate / 2, self.n_fft // 2 + 1)
@@ -151,7 +151,7 @@ class MelSpectrogramJAX:
         return mel_basis
 
     @functools.partial(jit, static_argnums=(0,))
-    def _pad_signal(self, signal: jnp.ndarray) -> jnp.ndarray:
+    def _pad_signal(self, signal: jax.Array) -> jax.Array:
         """Pad signal for centered STFT."""
         if self.center:
             pad_length = self.n_fft // 2
@@ -164,7 +164,7 @@ class MelSpectrogramJAX:
         return signal
 
     @functools.partial(jit, static_argnums=(0,))
-    def _stft_single_frame(self, frame: jnp.ndarray) -> jnp.ndarray:
+    def _stft_single_frame(self, frame: jax.Array) -> jax.Array:
         """Compute FFT for a single frame."""
         # Apply window
         windowed = frame[:self.win_length] * self.window_func
@@ -178,7 +178,7 @@ class MelSpectrogramJAX:
         return fft_result
 
     @functools.partial(jit, static_argnums=(0,))
-    def stft(self, signal: jnp.ndarray) -> jnp.ndarray:
+    def stft(self, signal: jax.Array) -> jax.Array:
         """
         Compute Short-Time Fourier Transform.
 
@@ -207,7 +207,7 @@ class MelSpectrogramJAX:
         return stft_frames.T
 
     @functools.partial(jit, static_argnums=(0,))
-    def __call__(self, signal: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, signal: jax.Array) -> jax.Array:
         """
         Compute Mel spectrogram from audio signal.
 
@@ -231,7 +231,7 @@ class MelSpectrogramJAX:
         return mel_spec
 
     @functools.partial(jit, static_argnums=(0,))
-    def compute_log_mel(self, signal: jnp.ndarray, ref: float = 1.0, amin: float = 1e-10) -> jnp.ndarray:
+    def compute_log_mel(self, signal: jax.Array, ref: float = 1.0, amin: float = 1e-10) -> jax.Array:
         """
         Compute log-scaled Mel spectrogram.
 

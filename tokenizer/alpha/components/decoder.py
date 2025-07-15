@@ -1,4 +1,4 @@
-import jax.numpy as jnp
+import jax
 from flax import nnx
 
 from tokenizer.utils.activation import Snake
@@ -59,10 +59,6 @@ class RawDecoder(nnx.Module):
         """
         self.output_48khz = output_48khz
 
-        # Calculate causal padding for ConvTranspose
-        # For causal ConvTranspose: padding = kernel_size - stride
-        # This ensures output starts aligned with input position
-
         # Mirror of encoder stages (in reverse order)
         # Stage 4: 50Hz -> 400Hz (stride 8)
         self.deconv4 = CausalConvTranspose(
@@ -113,7 +109,7 @@ class RawDecoder(nnx.Module):
                 rngs=rngs,
             )
     
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, x: jax.Array) -> jax.Array:
         """
         Args:
             x: Compressed embeddings [B, T, hidden_size] at 50Hz

@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 from flax import nnx
 from typing import List, Tuple
@@ -17,9 +18,9 @@ class PeriodDiscriminator(nnx.Module):
             nnx.Conv(1024, 1024, kernel_size=(kernel_size, 1), strides=(1, 1), padding=((2, 2), (0, 0)), rngs=rngs),
         ]
         
-        self.conv_post = nnx.Conv(1024, 1, kernel_size=(3, 1), strides=(1, 1), padding=((1, 1), (0, 0)), rngs=rngs)
+        self.conv_post = nnx.Conv(1024, 1, kernel_size=(3, 1), strides=(1, 1), padding=((1, 1), (0, 0)), rngs=rngs) # This can be linear.
         
-    def __call__(self, x: jnp.ndarray) -> Tuple[jnp.ndarray, List[jnp.ndarray]]:
+    def __call__(self, x: jax.Array) -> Tuple[jax.Array, List[jax.Array]]:
         """
         Args:
             x: Input tensor of shape [B, T]
@@ -40,7 +41,7 @@ class PeriodDiscriminator(nnx.Module):
         x = x.reshape(batch_size, time_steps // self.period, self.period)
         
         # Add channel dimension: [B, T/P, P, 1]
-        x = x[..., jnp.newaxis]
+        x = jnp.expand_dims(x, axis=-1)
         
         # Apply convolutions
         feature_maps = []
@@ -75,7 +76,7 @@ class MultiPeriodDiscriminator(nnx.Module):
             for period in periods
         ]
     
-    def __call__(self, x: jnp.ndarray) -> Tuple[List[jnp.ndarray], List[List[jnp.ndarray]]]:
+    def __call__(self, x: jax.Array) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
         """
         Args:
             x: Input waveform of shape [B, T] or [B, T, 1]

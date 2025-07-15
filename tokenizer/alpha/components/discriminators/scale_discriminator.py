@@ -1,4 +1,4 @@
-import jax.numpy as jnp
+import jax
 from flax import nnx
 from typing import List, Tuple
 
@@ -56,7 +56,7 @@ class ScaleDiscriminator(nnx.Module):
             
             in_channels = out_channels
     
-    def __call__(self, x: jnp.ndarray, training: bool = True) -> Tuple[jnp.ndarray, List[jnp.ndarray]]:
+    def __call__(self, x: jax.Array, training: bool = True) -> Tuple[jax.Array, List[jax.Array]]:
         """Forward pass returning output and intermediate features.
         
         Args:
@@ -118,7 +118,7 @@ class MultiScaleDiscriminator(nnx.Module):
             )
             self.discriminators.append(disc)
     
-    def __call__(self, x: jnp.ndarray, training: bool = True) -> Tuple[List[jnp.ndarray], List[List[jnp.ndarray]]]:
+    def __call__(self, x: jax.Array, training: bool = True) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
         """Forward pass through all scale discriminators.
         
         Args:
