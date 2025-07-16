@@ -164,7 +164,7 @@ class AudioTokenizerTrainer:
 
         def d_loss_fn(d_params):
             # Generate fake audio
-            with nnx.eval_mode():
+            with nnx.eval():
                 fake_audio, _, _, _ = self.generator(real_audio)
 
             # Multi-scale discriminator outputs
