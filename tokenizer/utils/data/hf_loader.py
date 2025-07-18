@@ -1,211 +1,297 @@
+import jax
+import jax.numpy as jnp
 from datasets import load_dataset, Audio
+from typing import Dict, List, Iterator, Optional, Tuple, Union
 import numpy as np
-from typing import Dict, Iterator, List
+import json
+from dataclasses import dataclass
+import logging
+
+from tokenizer.alpha.mask_utils import create_padding_mask, pad_sequences_left
+
+logger = logging.getLogger(__name__)
 
 
-class AudioStreamingDataset:
-    """Minimal wrapper around HuggingFace IterableDataset for audio streaming"""
+@dataclass
+class AudioBatch:
+    """Container for a batch of audio data with metadata."""
+    audio: jax.Array  # [B, T, 1] - padded audio waveforms
+    audio_lengths: jax.Array  # [B] - original audio lengths
+    mask: jax.Array  # [B, 1, 1, T] - attention mask
+    text: List[str]  # [B] - text transcriptions
+    language: List[str]  # [B] - language codes
+    speaker_features: Optional[jax.Array] = None  # [B, D] - speaker embeddings (future)
+
+    def to_dict(self) -> Dict[str, Union[jax.Array, List]]:
+        """Convert batch to dictionary format."""
+        data = {
+            "audio": self.audio,
+            "audio_lengths": self.audio_lengths,
+            "mask": self.mask,
+            "text": self.text,
+            "language": self.language,
+        }
+        if self.speaker_features is not None:
+            data["speaker_features"] = self.speaker_features
+        return data
+
+
+class EmiliaDataLoader:
+    """Streaming data loader for Emilia dataset with batching and padding."""
 
     def __init__(
             self,
-            dataset_name: str,
-            split: str = "train",
-            batch_size: int = 32,
-            sampling_rate: int = 16000,
-            drop_last_batch: bool = False
+            batch_size: int = 8,
+            sample_rate: int = 24000,
+            max_duration: float = 30.0,  # Maximum audio duration in seconds
+            num_workers: int = 4,
+            shuffle_buffer_size: int = 10000,
+            seed: int = 42,
+            subset: Optional[str] = None,  # Optional subset identifier
+            streaming: bool = True,
+            cache_dir: Optional[str] = None,
     ):
-        # Load dataset in streaming mode - creates an IterableDataset
-        self.dataset = load_dataset(
-            dataset_name,
-            split=split,
-            streaming=True
-        )
+        """Initialize the data loader.
 
-        # Cast audio column to desired sampling rate (resampling happens on-the-fly)
-        if "audio" in self.dataset.features:
-            self.dataset = self.dataset.cast_column(
-                "audio",
-                Audio(sampling_rate=sampling_rate)
+        Args:
+            batch_size: Number of samples per batch
+            sample_rate: Target sample rate for audio (24000 or 48000)
+            max_duration: Maximum audio duration to keep (in seconds)
+            num_workers: Number of workers for data loading
+            shuffle_buffer_size: Size of shuffle buffer for streaming
+            seed: Random seed for shuffling
+            subset: Optional subset of the dataset to load
+            streaming: Whether to use streaming mode
+            cache_dir: Optional cache directory for non-streaming mode
+        """
+        self.batch_size = batch_size
+        self.sample_rate = sample_rate
+        self.max_duration = max_duration
+        self.max_samples = int(max_duration * sample_rate)
+        self.num_workers = num_workers
+        self.shuffle_buffer_size = shuffle_buffer_size
+        self.seed = seed
+        self.subset = subset
+        self.streaming = streaming
+        self.cache_dir = cache_dir
+
+        # Load dataset
+        self._load_dataset()
+
+        # Initialize speaker feature extractor placeholder
+        self.speaker_extractor = None  # To be implemented
+
+    def _load_dataset(self):
+        """Load the Emilia dataset with appropriate configuration."""
+        logger.info(f"Loading Emilia dataset (streaming={self.streaming})")
+
+        try:
+            # Load the dataset
+            self.dataset = load_dataset(
+                "amphion/Emilia-Dataset",
+                split="train",
+                streaming=self.streaming,
+                cache_dir=self.cache_dir,
             )
 
-        self.batch_size = batch_size
-        self.drop_last_batch = drop_last_batch
-        self.sampling_rate = sampling_rate
+            # Apply subset filtering if specified
+            if self.subset:
+                self.dataset = self.dataset.filter(
+                    lambda x: self._filter_subset(x)
+                )
 
-    def __iter__(self) -> Iterator[Dict[str, List]]:
-        """Iterate over batched examples"""
-        # Create batched iterator
-        batched_dataset = self.dataset.batch(
-            batch_size=self.batch_size,
-            drop_last_batch=self.drop_last_batch
+            # Shuffle if in streaming mode
+            if self.streaming:
+                self.dataset = self.dataset.shuffle(
+                    seed=self.seed,
+                    buffer_size=self.shuffle_buffer_size
+                )
+
+            # Apply preprocessing
+            self.dataset = self.dataset.map(
+                self._preprocess_sample,
+                remove_columns=["__key__", "__url__"]            )
+
+            # Filter by duration
+            self.dataset = self.dataset.filter(
+                lambda x: x["duration"] <= self.max_duration
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to load dataset: {e}")
+            raise
+
+    def _filter_subset(self, sample: Dict) -> bool:
+        """Filter samples based on subset criteria."""
+        # Implement subset filtering logic here
+        # For example, filter by language or other metadata
+        return True
+
+    def _preprocess_sample(self, sample: Dict) -> Dict:
+        """Preprocess a single sample from the dataset."""
+        # Parse JSON metadata
+        metadata = json.loads(sample["json"]) if isinstance(sample["json"], str) else sample["json"]
+
+        # Extract audio array
+        audio_data = sample["mp3"]
+        if isinstance(audio_data, dict) and "array" in audio_data:
+            audio_array = audio_data["array"]
+            original_sr = audio_data.get("sampling_rate", 48000)
+        else:
+            # Handle different audio formats
+            audio_array = np.array(audio_data)
+            original_sr = 48000  # Default assumption
+
+        # Resample if necessary
+        if original_sr != self.sample_rate:
+            # Simple downsampling (for better quality, use librosa or torchaudio)
+            resample_ratio = self.sample_rate / original_sr
+            audio_array = audio_array[::int(1 / resample_ratio)] if resample_ratio < 1 else audio_array
+
+        # Convert to float32 and normalize
+        audio_array = audio_array.astype(np.float32)
+        if audio_array.max() > 1.0:
+            audio_array = audio_array / 32768.0  # Assuming 16-bit audio
+
+        # Calculate duration
+        duration = len(audio_array) / self.sample_rate
+
+        return {
+            "audio": audio_array,
+            "text": metadata.get("text", ""),
+            "language": metadata.get("language", "unknown"),
+            "duration": duration,
+            "original_metadata": metadata,  # Keep for potential future use
+        }
+
+    def _extract_speaker_features(self, audio_batch: np.ndarray) -> Optional[np.ndarray]:
+        """Extract speaker features from audio batch.
+
+        Args:
+            audio_batch: Batch of audio arrays [B, T]
+
+        Returns:
+            Speaker features [B, D] or None if extractor not available
+        """
+        if self.speaker_extractor is None:
+            return None
+
+        # Placeholder for speaker feature extraction
+        # This could use models like speaker encoders, x-vectors, etc.
+        # For now, return None
+        return None
+
+    def _collate_batch(self, samples: List[Dict]) -> AudioBatch:
+        """Collate samples into a batch with left-padding."""
+        batch_size = len(samples)
+
+        # Extract audio arrays and metadata
+        audio_arrays = []
+        texts = []
+        languages = []
+
+        for sample in samples:
+            audio = sample["audio"]
+            # Truncate if too long
+            if len(audio) > self.max_samples:
+                audio = audio[:self.max_samples]
+            audio_arrays.append(audio)
+            texts.append(sample["text"])
+            languages.append(sample["language"])
+
+        # Find max length in batch
+        lengths = np.array([len(audio) for audio in audio_arrays])
+        max_length = int(lengths.max())
+
+        # Pad audio arrays (left-padding)
+        padded_audio = []
+        for audio, length in zip(audio_arrays, lengths):
+            if length < max_length:
+                pad_width = max_length - length
+                padded = np.pad(audio, (pad_width, 0), mode='constant', constant_values=0)
+            else:
+                padded = audio
+            # Add channel dimension
+            padded = padded[:, np.newaxis]  # [T, 1]
+            padded_audio.append(padded)
+
+        # Stack into batch
+        audio_batch = np.stack(padded_audio, axis=0)  # [B, T, 1]
+
+        # Convert to JAX arrays
+        audio_jax = jnp.array(audio_batch)
+        lengths_jax = jnp.array(lengths)
+
+        # Create attention mask (non-causal for encoder)
+        mask = create_padding_mask(lengths_jax, max_length, causal=False)
+
+        # Extract speaker features if available
+        speaker_features = self._extract_speaker_features(audxio_batch[:, :, 0])
+        if speaker_features is not None:
+            speaker_features = jnp.array(speaker_features)
+
+        return AudioBatch(
+            audio=audio_jax,
+            audio_lengths=lengths_jax,
+            mask=mask,
+            text=texts,
+            language=languages,
+            speaker_features=speaker_features,
         )
 
-        for batch in batched_dataset:
-            yield batch
-
-    def preprocess_batch(self, batch: Dict[str, List]) -> Dict[str, np.ndarray]:
-        """Basic preprocessing - extract audio arrays and stack them"""
-        if "audio" in batch:
-            # Extract audio arrays from the batch
-            # Each audio item has 'array', 'path', and 'sampling_rate' keys
-            audio_arrays = [audio["array"] for audio in batch["audio"]]
-
-            # Find max length for padding
-            max_length = max(len(arr) for arr in audio_arrays)
-
-            # Pad all arrays to same length
-            padded_arrays = []
-            for arr in audio_arrays:
-                if len(arr) < max_length:
-                    padded = np.pad(arr, (0, max_length - len(arr)), mode='constant')
-                else:
-                    padded = arr
-                padded_arrays.append(padded)
-
-            # Stack into batch tensor
-            batch["audio_tensor"] = np.stack(padded_arrays)
-
-            # Store original lengths for masking
-            batch["audio_lengths"] = np.array([len(arr) for arr in audio_arrays])
-
-        return batch
-
-
-# Minimal usage example
-def minimal_example():
-    """Simplest possible example of streaming audio data"""
-    print("=== Minimal Streaming Example ===")
-
-    # Load a small audio dataset
-    dataset = load_dataset(
-        "PolyAI/minds14",  # Multi-lingual banking intent dataset
-        name="en-US",  # English subset
-        split="train",
-        streaming=True
-    )
-
-    # Iterate over first 3 examples
-    for i, example in enumerate(dataset):
-        if i >= 3:
-            break
-
-        audio_array = example["audio"]["array"]
-        sample_rate = example["audio"]["sampling_rate"]
-        duration = len(audio_array) / sample_rate
-
-        print(f"\nExample {i}:")
-        print(f"  Audio shape: {audio_array.shape}")
-        print(f"  Sample rate: {sample_rate} Hz")
-        print(f"  Duration: {duration:.2f} seconds")
-        print(f"  Intent: {example.get('intent_class', 'N/A')}")
-
-
-# Batched processing example
-def batched_example():
-    """Example with batch processing"""
-    print("\n=== Batched Processing Example ===")
-
-    # Create streaming dataset with batching
-    audio_dataset = AudioStreamingDataset(
-        dataset_name="PolyAI/minds14",
-        split="train",
-        batch_size=4,
-        sampling_rate=16000
-    )
-
-    # Process first 2 batches
-    for batch_idx, batch in enumerate(audio_dataset):
-        if batch_idx >= 2:
-            break
-
-        # Apply preprocessing
-        processed = audio_dataset.preprocess_batch(batch)
-
-        print(f"\nBatch {batch_idx}:")
-        print(f"  Batch keys: {list(batch.keys())}")
-        print(f"  Audio tensor shape: {processed['audio_tensor'].shape}")
-        print(f"  Audio lengths: {processed['audio_lengths']}")
-
-
-# Advanced: Custom preprocessing with .map()
-def advanced_preprocessing_example():
-    """Example using .map() for on-the-fly preprocessing"""
-    print("\n=== Advanced Preprocessing Example ===")
-
-    dataset = load_dataset(
-        "PolyAI/minds14",
-        name="en-US",
-        split="train",
-        streaming=True
-    )
-
-    def extract_features(examples):
-        """Extract simple features from audio"""
-        # This runs on batches when batched=True
-        features = []
-        for audio in examples["audio"]:
-            arr = audio["array"]
-            # Simple features: mean, std, max amplitude
-            features.append({
-                "mean": float(np.mean(arr)),
-                "std": float(np.std(arr)),
-                "max_amp": float(np.max(np.abs(arr))),
-                "duration": len(arr) / audio["sampling_rate"]
-            })
-        examples["audio_features"] = features
-        return examples
-
-    # Apply preprocessing on-the-fly with batching
-    processed_dataset = dataset.map(
-        extract_features,
-        batched=True,
-        batch_size=8
-    )
-
-    # Check first example
-    first = next(iter(processed_dataset))
-    print(f"Processed example keys: {list(first.keys())}")
-    print(f"Audio features: {first['audio_features']}")
-
-
-# Manual iteration with custom batch handling
-def manual_batch_iteration():
-    """Manually handle batching for maximum control"""
-    print("\n=== Manual Batch Iteration ===")
-
-    dataset = load_dataset(
-        "PolyAI/minds14",
-        name="en-US",
-        split="train",
-        streaming=True
-    )
-
-    batch_size = 4
-    batch = []
-
-    for idx, example in enumerate(dataset):
-        batch.append(example)
-
-        if len(batch) == batch_size:
-            # Process batch
-            audio_arrays = [ex["audio"]["array"] for ex in batch]
-            labels = [ex["intent_class"] for ex in batch]
-
-            print(f"\nManual batch {idx // batch_size}:")
-            print(f"  Audio shapes: {[arr.shape for arr in audio_arrays]}")
-            print(f"  Labels: {labels}")
-
-            # Clear batch
+    def __iter__(self) -> Iterator[AudioBatch]:
+        """Iterate over batches of data."""
+        if self.streaming:
+            # Streaming mode: collect samples into batches
             batch = []
+            for sample in self.dataset:
+                batch.append(sample)
+                if len(batch) == self.batch_size:
+                    yield self._collate_batch(batch)
+                    batch = []
 
-        # Stop after 2 batches
-        if idx >= 2 * batch_size:
-            break
+            # Yield remaining samples if any
+            if batch:
+                yield self._collate_batch(batch)
+        else:
+            # Non-streaming mode: use indices
+            num_samples = len(self.dataset)
+            indices = np.arange(num_samples)
+            np.random.shuffle(indices)
+
+            for i in range(0, num_samples, self.batch_size):
+                batch_indices = indices[i:i + self.batch_size]
+                batch = [self.dataset[int(idx)] for idx in batch_indices]
+                yield self._collate_batch(batch)
+
+    def __len__(self) -> Optional[int]:
+        """Return dataset length if available (non-streaming mode)."""
+        if not self.streaming:
+            return len(self.dataset) // self.batch_size
+        return None
 
 
+# Example usage and testing
 if __name__ == "__main__":
-    # Run examples
-    minimal_example()
-    batched_example()
-    advanced_preprocessing_example()
-    manual_batch_iteration()
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+
+    # Create data loader
+    loader = EmiliaDataLoader(
+        batch_size=4,
+        sample_rate=24000,
+        max_duration=10.0,
+        streaming=True,
+    )
+
+    # Test iteration
+    for i, batch in enumerate(loader):
+        print(f"\nBatch {i}:")
+        print(f"  Audio shape: {batch.audio.shape}")
+        print(f"  Audio lengths: {batch.audio_lengths}")
+        print(f"  Mask shape: {batch.mask.shape}")
+        print(f"  Languages: {batch.language}")
+        print(f"  Text samples: {[text[:50] + '...' if len(text) > 50 else text for text in batch.text]}")
+
+        if i >= 2:  # Just show a few batches
+            break
