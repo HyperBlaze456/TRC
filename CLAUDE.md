@@ -24,16 +24,14 @@ source /usr/programming/uv/machine_learning/bin/activate
 - **Production Focus**: This is not just a learning exercise - aim for production-quality implementations but still easy to use.
 
 ## Project Structure
-
-- **`/Learning/`**: Contains Jupyter notebooks with Flax NNX experiments and tutorials
-  - `easy.ipynb`: Introduction to Flax NNX state management using VAE examples
-  - `train_easy.ipynb`: Training implementations
-
 - **`/tokenizer/`**: Main audio tokenization model implementation
   - `alpha/`: Primary model version with encoder-decoder architecture
     - `components/`: Core model components (encoder, decoder, quantizer, discriminator)
+    - `losses/`: Invalid, need-revise loss functions. This directory will be used later to hold the split `loss.py` components. 
+    - `mask_utils.py`: Left-padding and validation mask generation utilities
     - `model.py`: Model assembly
-    - `train.py`: Training script (currently empty, to be implemented)
+    - `loss.py`: All the losses. This is going to be extensively tested along with mask utils and later on separated.
+    - `train_prelim.py`: Training script that is complex and incorrect. Do not make this mistake!
   - `utils/`: Shared utilities and building blocks
     - `attention.py`: Multi-head attention with RoPE support
     - `activation.py`: Custom activations (Snake activation)
@@ -44,7 +42,7 @@ source /usr/programming/uv/machine_learning/bin/activate
     - `norm.py`: Normalization layers (AdaRMSZero)
     - `metrics/`: Logging utilities (W&B, TensorBoard, JAX profiling)
 
-- **`/HyperTTS/`**: Text-to-speech related experiments (contents not yet explored)
+- **`/HyperTTS/`**: Text-to-speech related experiments and possibly final 
 
 ## Key Architecture Details
 

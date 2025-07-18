@@ -11,7 +11,7 @@ from .reconstruction import (
     perceptual_stft_loss
 )
 from .ctc import ctc_loss
-
+# deprecate this
 __all__ = [
     'hinge_loss_generator',
     'hinge_loss_discriminator',
