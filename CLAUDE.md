@@ -56,6 +56,10 @@ Production-grade audio tokenizer inspired by EnCodec and SoundStream:
   - Implements both Binary Spherical Quantizer and Vector Quantizer options
 - **RawDecoder**: Reconstructs high-quality audio from quantized representations
 
+This model works like typical Descript Audio Codec, downsampling raw audio to latent frames and then involving quantizer, then returning it back using decoder. The Encoder and Decoder are fully convolutional, both of them mirrored.
+For the Quantizer, the model usees two layer RVQ method. First VQ has relatively small size, because it serves the role of CTC-like phoneme inference for those frames. The residual would be handled by BSQ. VQ is focused on minimizing phoneme matching loss solely, while BSQ is focused on capturing all the residuals and minimizing divergence of original.
+Full model will get these losses. Refer to loss.py's defined default loss recipe for further details.
+
 ### DiT Model (`/tokenizer/utils/dit.py`)
 - Implements Diffusion Transformer for denoising tasks
 - Supports conditional generation with speaker embeddings
