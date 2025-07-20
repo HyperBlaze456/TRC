@@ -4,7 +4,7 @@ import jax
 from tokenizer.alpha.components.encoder import RawEncoder
 from tokenizer.alpha.components.quantizer import PhonemeBSQQuantizer
 from tokenizer.alpha.components.decoder import RawDecoder
-from tokenizer.alpha.mask_utils import downsample_mask
+# downsample_mask is no longer needed - masks are pre-computed
 
 
 class AudioTokenizer(nnx.Module):
@@ -77,7 +77,7 @@ class AudioTokenizer(nnx.Module):
 
         Args:
             x: Raw audio waveform [B, T, 1] (channels last)
-            mask: Optional attention mask [B, 1, 1, T] or [B, 1, T, T] where True = valid
+            mask: Pre-computed encoder mask at encoder resolution [B, 1, 1, T'] or [B, 1, T', T']
 
         Returns:
             reconstructed: Reconstructed audio [B, T, 1]
@@ -85,11 +85,8 @@ class AudioTokenizer(nnx.Module):
             acoustic_codes: Binary acoustic codes [B, T', spherical_dim]
             encoder_output: Encoder output before quantization [B, T', D]
         """
-        # Downsample mask to match encoder output temporal resolution
-        encoder_mask = downsample_mask(mask, self.downsample_factor)
-
-        # Encode audio to latent representation with mask
-        encoder_output = self.encoder(x, mask=encoder_mask)
+        # Encode audio to latent representation with pre-computed mask
+        encoder_output = self.encoder(x, mask=mask)
 
         # Quantize with phoneme VQ + acoustic BSQ
         quantized, phoneme_indices, acoustic_codes = self.quantizer(encoder_output)
@@ -104,17 +101,14 @@ class AudioTokenizer(nnx.Module):
 
         Args:
             x: Raw audio waveform [B, T, 1]
-            mask: Optional attention mask [B, 1, 1, T] or [B, 1, T, T]
+            mask: Pre-computed encoder mask at encoder resolution [B, 1, 1, T'] or [B, 1, T', T']
 
         Returns:
             phoneme_indices: Phoneme codebook indices [B, T']
             acoustic_codes: Binary acoustic codes [B, T', spherical_dim]
         """
-        # Downsample mask to match encoder output
-        encoder_mask = downsample_mask(mask, self.downsample_factor)
-
-        # Encode to latent
-        encoder_output = self.encoder(x, mask=encoder_mask)
+        # Encode to latent with pre-computed mask
+        encoder_output = self.encoder(x, mask=mask)
 
         # Get discrete codes
         phoneme_indices, acoustic_codes = self.quantizer.encode(encoder_output)
