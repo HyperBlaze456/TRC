@@ -67,8 +67,9 @@ class STFTDiscriminator(nnx.Module):
                   for f in feats]
         return jnp.stack(padded, 0)
 
-    def __call__(self, x: jax.Array, *, training: bool = True):
+    def __call__(self, x: jax.Array, *, training: bool = True) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
         outputs = []
+        all_features = []
 
         for i, (fft, hop, win) in enumerate(zip(self.fft_sizes,
                                                 self.hop_lengths,
@@ -80,10 +81,11 @@ class STFTDiscriminator(nnx.Module):
             feat = jnp.stack([jnp.abs(spec), jnp.angle(spec)], -1)  # [B, T_f, F, 2]
 
             # Apply discriminator
-            out = self.discriminators[i](feat, training=training)  # [B]
+            out, features = self.discriminators[i](feat, training=training)
             outputs.append(out)
+            all_features.append(features)
 
-        return jnp.stack(outputs, 0)  # [R, B]
+        return outputs, all_features
 
 
 class STFTResolutionDiscriminator(nnx.Module):
@@ -113,16 +115,19 @@ class STFTResolutionDiscriminator(nnx.Module):
                                  padding=padding,
                                  rngs=rngs)
 
-    def __call__(self, x: jax.Array, *, training: bool) -> jax.Array:
+    def __call__(self, x: jax.Array, *, training: bool) -> Tuple[jax.Array, List[jax.Array]]:
         # Input must be in the shape of [B, T_f, F, 2]. That 2 is the channel.
         # Apply conv layers with ELU activation
+        features = []
         for conv in self.convs:
             x = conv(x)
             x = nnx.elu(x)
+            features.append(x)
 
         # Final conv to single channel
         x = self.out_conv(x)
+        features.append(x)
 
         # Global average pooling
         x = jnp.mean(x, axis=(1, 2))
-        return jnp.squeeze(x, -1)  # [B]
+        return jnp.squeeze(x, -1), features  # [B], List of features
