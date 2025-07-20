@@ -48,6 +48,54 @@ def create_padding_mask(
     return mask.astype(dtype)
 
 
+def create_encoder_masks(
+        lengths: jax.Array,
+        max_length: int,
+        downsample_factor: int,
+        dtype: jnp.dtype = jnp.bool_
+) -> Tuple[jax.Array, jax.Array]:
+    """Create memory-efficient encoder masks at downsampled resolution.
+    
+    This function creates both non-causal and causal masks directly at the
+    encoder resolution, avoiding the memory overhead of full-resolution causal masks.
+    
+    Args:
+        lengths: Array of actual sequence lengths [B]
+        max_length: Maximum sequence length in the batch (at audio resolution)
+        downsample_factor: How much the encoder downsamples (e.g., 480 for 24kHz->50Hz)
+        dtype: Data type for the mask
+        
+    Returns:
+        encoder_mask: Non-causal padding mask at encoder resolution [B, 1, 1, T']
+        encoder_causal_mask: Causal mask at encoder resolution [B, 1, T', T']
+    """
+    batch_size = lengths.shape[0]
+    encoder_max_length = max_length // downsample_factor
+    
+    # Create encoder lengths
+    # A frame is valid if it contains ANY valid audio sample
+    encoder_lengths = jnp.ceil(lengths / downsample_factor).astype(jnp.int32)
+    
+    # Create position indices at encoder resolution
+    positions = jnp.arange(encoder_max_length)[None, :]  # [1, T']
+    
+    # Create padding mask at encoder resolution
+    padding_mask = positions < encoder_lengths[:, None]  # [B, T']
+    
+    # Non-causal mask for encoder
+    encoder_mask = padding_mask[:, None, None, :]  # [B, 1, 1, T']
+    
+    # Causal mask at encoder resolution (much smaller than audio resolution)
+    causal_mask = jnp.tril(jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype))  # [T', T']
+    
+    # Combine with padding mask
+    padding_mask_expanded = padding_mask[:, None, :]  # [B, 1, T']
+    encoder_causal_mask = padding_mask_expanded & causal_mask[None, :, :]  # [B, T', T']
+    encoder_causal_mask = encoder_causal_mask[:, None, :, :]  # [B, 1, T', T']
+    
+    return encoder_mask.astype(dtype), encoder_causal_mask.astype(dtype)
+
+
 def downsample_mask(
         mask: Optional[jax.Array],
         downsample_factor: int
