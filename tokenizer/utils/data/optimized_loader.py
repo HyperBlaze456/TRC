@@ -1,30 +1,22 @@
-"""Optimized audio data loader with streaming, parallel processing, and profiling."""
+"""Simple audio data loader using native HuggingFace methods."""
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-from typing import Dict, List, Optional, Iterator, Tuple, Any, Callable
-import librosa
+from typing import Dict, List, Optional, Iterator, Any
 from datasets import load_dataset, Audio
 from dataclasses import dataclass
 import json
-import io
-import time
-from concurrent.futures import ThreadPoolExecutor, Future
-from queue import Queue
-import threading
-from collections import deque
 import warnings
 
 from tokenizer.alpha.mask_utils import pad_sequences_left, create_padding_mask, create_encoder_masks
 
-# Suppress librosa warnings for performance
-warnings.filterwarnings('ignore', category=UserWarning, module='librosa')
+# Suppress potential warnings
+warnings.filterwarnings('ignore', category=UserWarning)
 
 
 @dataclass
 class AudioConfig:
-    """Configuration for optimized audio loading."""
+    """Configuration for simple audio loading."""
     dataset_name: str = "hf-internal-testing/librispeech_asr_dummy"
     dataset_config: str = "clean"
     split: str = "validation"
@@ -32,70 +24,16 @@ class AudioConfig:
     batch_size: int = 8
     max_duration_seconds: float = 10.0
     streaming: bool = True
-    # Optimization parameters
-    num_workers: int = 4  # Number of parallel audio decoders
-    prefetch_batches: int = 2  # Number of batches to prefetch
-    decode_timeout: float = 30.0  # Timeout for audio decoding
-    # Profiling parameters
-    profile: bool = True
-    profile_interval: int = 10  # Print stats every N batches
-
-
-class ProfilingStats:
-    """Track performance metrics."""
-    
-    def __init__(self):
-        self.reset()
-    
-    def reset(self):
-        self.fetch_times = []
-        self.decode_times = []
-        self.batch_times = []
-        self.total_samples = 0
-        self.failed_samples = 0
-        self.start_time = time.time()
-    
-    def print_stats(self, batch_idx: int):
-        """Print current statistics."""
-        elapsed = time.time() - self.start_time
-        
-        if self.fetch_times:
-            avg_fetch = np.mean(self.fetch_times[-100:])  # Last 100 samples
-        else:
-            avg_fetch = 0
-            
-        if self.decode_times:
-            avg_decode = np.mean(self.decode_times[-100:])
-        else:
-            avg_decode = 0
-            
-        if self.batch_times:
-            avg_batch = np.mean(self.batch_times[-10:])  # Last 10 batches
-        else:
-            avg_batch = 0
-        
-        samples_per_sec = self.total_samples / elapsed if elapsed > 0 else 0
-        
-        print(f"\n=== Profiling Stats (Batch {batch_idx}) ===")
-        print(f"Total time: {elapsed:.1f}s")
-        print(f"Total samples: {self.total_samples} ({self.failed_samples} failed)")
-        print(f"Throughput: {samples_per_sec:.1f} samples/sec")
-        print(f"Avg fetch time: {avg_fetch*1000:.1f}ms")
-        print(f"Avg decode time: {avg_decode*1000:.1f}ms") 
-        print(f"Avg batch creation: {avg_batch*1000:.1f}ms")
-        print(f"Pipeline efficiency: {(avg_decode / (avg_fetch + avg_decode + 1e-6)) * 100:.1f}%")
-        print("=" * 40)
 
 
 class OptimizedAudioLoader:
-    """Optimized audio loader with parallel processing and profiling."""
+    """Simple audio loader using native dataset methods."""
     
     def __init__(self, config: AudioConfig):
         self.config = config
         self.max_samples = int(config.max_duration_seconds * config.sample_rate)
-        self.stats = ProfilingStats() if config.profile else None
         
-        # Load dataset
+        # Load dataset with HuggingFace's native JAX support
         print(f"Loading dataset: {config.dataset_name}/{config.dataset_config}")
         self.dataset = load_dataset(
             config.dataset_name,
@@ -107,13 +45,16 @@ class OptimizedAudioLoader:
         # Detect columns
         self._setup_audio_column()
         
-        # Setup parallel processing
-        self.executor = ThreadPoolExecutor(max_workers=config.num_workers)
-        self.decode_queue = Queue(maxsize=config.prefetch_batches * config.batch_size * 2)
-        self.batch_queue = Queue(maxsize=config.prefetch_batches)
-        
-        # Start background threads
-        self._start_workers()
+        # Cast audio column to correct format
+        if self.audio_column and hasattr(self.dataset, 'cast_column'):
+            try:
+                self.dataset = self.dataset.cast_column(
+                    self.audio_column,
+                    Audio(sampling_rate=config.sample_rate)
+                )
+                print(f"Cast audio column to {config.sample_rate}Hz")
+            except Exception as e:
+                print(f"Warning: Could not cast audio column: {e}")
     
     def _setup_audio_column(self):
         """Setup audio column based on dataset format."""
@@ -142,186 +83,104 @@ class OptimizedAudioLoader:
         
         print(f"Detected audio column: {self.audio_column}")
         print(f"Detected metadata column: {self.metadata_column}")
-        
-        # Cast audio column if streaming not enabled
-        if self.audio_column and not self.config.streaming and hasattr(self.dataset, 'cast_column'):
-            try:
-                self.dataset = self.dataset.cast_column(
-                    self.audio_column,
-                    Audio(sampling_rate=self.config.sample_rate)
-                )
-            except Exception as e:
-                print(f"Warning: Could not cast audio column: {e}")
     
-    def _start_workers(self):
-        """Start background worker threads."""
-        # Start dataset fetcher thread
-        self.fetch_thread = threading.Thread(target=self._fetch_worker, daemon=True)
-        self.fetch_thread.start()
+    def _resample_jax(self, audio: jax.Array, orig_sr: int, target_sr: int) -> jax.Array:
+        """Simple resampling using JAX operations."""
+        if orig_sr == target_sr:
+            return audio
         
-        # Start batch creator thread  
-        self.batch_thread = threading.Thread(target=self._batch_worker, daemon=True)
-        self.batch_thread.start()
-    
-    def _fetch_worker(self):
-        """Background thread that fetches samples from dataset."""
-        futures = deque()
+        # Simple linear interpolation resampling
+        ratio = target_sr / orig_sr
+        old_length = audio.shape[0]
+        new_length = int(old_length * ratio)
         
-        for sample in self.dataset:
-            fetch_start = time.time()
-            
-            # Submit decode job
-            future = self.executor.submit(self._process_sample, sample)
-            futures.append((future, fetch_start))
-            
-            # Check completed futures
-            while futures and futures[0][0].done():
-                future, fetch_start = futures.popleft()
-                try:
-                    result = future.result(timeout=self.config.decode_timeout)
-                    if result is not None:
-                        self.decode_queue.put(result)
-                        if self.stats:
-                            self.stats.total_samples += 1
-                            self.stats.fetch_times.append(time.time() - fetch_start)
-                    else:
-                        if self.stats:
-                            self.stats.failed_samples += 1
-                except Exception as e:
-                    print(f"Decode error: {e}")
-                    if self.stats:
-                        self.stats.failed_samples += 1
-            
-            # Prevent queue overflow
-            while len(futures) > self.config.num_workers * 2:
-                time.sleep(0.01)
+        # Create interpolation indices
+        old_indices = jnp.arange(old_length)
+        new_indices = jnp.linspace(0, old_length - 1, new_length)
         
-        # Wait for remaining futures
-        for future, fetch_start in futures:
-            try:
-                result = future.result(timeout=self.config.decode_timeout)
-                if result is not None:
-                    self.decode_queue.put(result)
-            except Exception as e:
-                print(f"Final decode error: {e}")
+        # Linear interpolation
+        resampled = jnp.interp(new_indices, old_indices, audio)
         
-        # Signal completion
-        self.decode_queue.put(None)
-    
-    def _batch_worker(self):
-        """Background thread that creates batches."""
-        buffer = []
-        
-        while True:
-            # Get decoded sample
-            sample = self.decode_queue.get()
-            if sample is None:
-                # End of data
-                if buffer:
-                    batch = self._create_batch(buffer)
-                    self.batch_queue.put(batch)
-                self.batch_queue.put(None)
-                break
-            
-            buffer.append(sample)
-            
-            # Create batch when full
-            if len(buffer) >= self.config.batch_size:
-                batch_start = time.time()
-                batch = self._create_batch(buffer[:self.config.batch_size])
-                self.batch_queue.put(batch)
-                buffer = buffer[self.config.batch_size:]
-                
-                if self.stats:
-                    self.stats.batch_times.append(time.time() - batch_start)
+        return resampled
     
     def _process_sample(self, sample: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Process a single sample (runs in parallel)."""
-        decode_start = time.time()
-        
+        """Process a single sample."""
         try:
             audio_array = None
-            sr = None
+            sr = self.config.sample_rate
             
-            # Extract audio
+            # Extract audio - HuggingFace already provides it as JAX array
             if self.audio_column and self.audio_column in sample:
                 audio_data = sample[self.audio_column]
                 
                 if isinstance(audio_data, dict) and 'array' in audio_data:
-                    audio_array = audio_data['array']
+                    # HuggingFace Audio feature format - convert to JAX
+                    audio_array = jnp.array(audio_data['array'], dtype=jnp.float32)
                     sr = audio_data.get('sampling_rate', self.config.sample_rate)
-                elif isinstance(audio_data, (np.ndarray, list)):
-                    audio_array = np.array(audio_data)
-                    sr = self.config.sample_rate
-                elif isinstance(audio_data, bytes):
-                    # MP3/compressed audio - main bottleneck
-                    audio_array, sr = librosa.load(
-                        io.BytesIO(audio_data), 
-                        sr=self.config.sample_rate,  # Directly load at target SR
-                        mono=True,  # Load as mono directly
-                        res_type='kaiser_fast'  # Faster resampling
-                    )
+                elif hasattr(audio_data, 'shape'):
+                    # Already a JAX/numpy array
+                    audio_array = jnp.array(audio_data, dtype=jnp.float32)
                 else:
                     return None
                 
-                # Resample if needed (should be rare with direct loading)
+                # Resample if needed
                 if sr != self.config.sample_rate:
-                    audio_array = librosa.resample(
-                        audio_array,
-                        orig_sr=sr,
-                        target_sr=self.config.sample_rate,
-                        res_type='kaiser_fast'
-                    )
+                    audio_array = self._resample_jax(audio_array, sr, self.config.sample_rate)
+                
+                # Convert to mono if needed
+                if audio_array.ndim > 1:
+                    audio_array = jnp.mean(audio_array, axis=0)
+                
+                # Truncate if too long
+                if len(audio_array) > self.max_samples:
+                    audio_array = audio_array[:self.max_samples]
+                
+                # Normalization
+                max_val = jnp.abs(audio_array).max()
+                if max_val > 0:
+                    audio_array = audio_array * (0.95 / max_val)
             else:
                 return None
             
-            # Convert to mono if needed
-            if audio_array.ndim > 1:
-                audio_array = np.mean(audio_array, axis=0)
-            
-            # Truncate if too long
-            if len(audio_array) > self.max_samples:
-                audio_array = audio_array[:self.max_samples]
-            
-            # Fast normalization
-            max_val = np.abs(audio_array).max()
-            if max_val > 0:
-                audio_array = audio_array * (0.95 / max_val)
-            
             # Parse metadata
-            metadata = {}
+            text = None
+            language = 'EN'
+            
             if self.metadata_column and self.metadata_column in sample:
                 try:
                     if self.metadata_column == 'json' and isinstance(sample[self.metadata_column], str):
                         metadata = json.loads(sample[self.metadata_column])
+                        text = metadata.get('text', '')
+                        language = metadata.get('language', metadata.get('locale', 'EN'))
                     elif isinstance(sample[self.metadata_column], dict):
                         metadata = sample[self.metadata_column]
+                        text = metadata.get('text', '')
+                        language = metadata.get('language', metadata.get('locale', 'EN'))
                     elif isinstance(sample[self.metadata_column], str):
-                        metadata = {'text': sample[self.metadata_column]}
+                        text = sample[self.metadata_column]
                 except:
                     pass
             
             result = {
-                'audio': audio_array.astype(np.float32),
-                'length': len(audio_array)
+                'audio': audio_array,
+                'length': len(audio_array),
+                'text': text,
+                'language': language
             }
-            
-            # Add metadata
-            for key, value in metadata.items():
-                result[f'meta_{key}'] = value
-            
-            if self.stats:
-                self.stats.decode_times.append(time.time() - decode_start)
             
             return result
             
         except Exception as e:
-            if self.stats and self.stats.failed_samples < 10:
-                print(f"Sample processing error: {e}")
+            print(f"Sample processing error: {e}")
             return None
     
     def _create_batch(self, samples: List[Dict[str, Any]]) -> Dict[str, jax.Array]:
         """Create a padded batch from samples."""
+        # Filter out None samples
+        samples = [s for s in samples if s is not None]
+        if not samples:
+            return None
+        
         # Get audio arrays and lengths
         audio_arrays = [s['audio'] for s in samples]
         lengths = [s['length'] for s in samples]
@@ -329,12 +188,13 @@ class OptimizedAudioLoader:
         # Find max length
         max_length = max(lengths)
         
-        # Make divisible by 480 for 24kHz (50Hz output)
-        if max_length % 480 != 0:
-            max_length = ((max_length // 480) + 1) * 480
+        # Make divisible by 480 for 24kHz (50Hz output) or 960 for 48kHz
+        downsample_factor = 480 if self.config.sample_rate == 24000 else 960
+        if max_length % downsample_factor != 0:
+            max_length = ((max_length // downsample_factor) + 1) * downsample_factor
         
-        # Convert to JAX arrays
-        audio_sequences = [jnp.array(audio, dtype=jnp.float32) for audio in audio_arrays]
+        # Audio arrays are already JAX arrays
+        audio_sequences = audio_arrays
         
         # Pad sequences (left-padding)
         padded_audio, _ = pad_sequences_left(
@@ -353,7 +213,6 @@ class OptimizedAudioLoader:
         mask = create_padding_mask(lengths_array, max_length, causal=False)
         
         # Create encoder-level masks
-        downsample_factor = 480 if self.config.sample_rate == 24000 else 960
         encoder_mask, encoder_causal_mask = create_encoder_masks(
             lengths_array, max_length, downsample_factor
         )
@@ -366,35 +225,35 @@ class OptimizedAudioLoader:
             'encoder_causal_mask': encoder_causal_mask,
         }
         
-        # Collect metadata
-        metadata_keys = set()
-        for sample in samples:
-            metadata_keys.update(k for k in sample.keys() if k.startswith('meta_'))
-        
-        for key in metadata_keys:
-            batch[key] = [sample.get(key, None) for sample in samples]
+        # Add text and language metadata
+        batch['meta_text'] = [s.get('text', '') for s in samples]
+        batch['meta_language'] = [s.get('language', 'EN') for s in samples]
         
         return batch
     
     def __iter__(self) -> Iterator[Dict[str, jax.Array]]:
         """Iterate over batches."""
-        batch_idx = 0
+        batch_buffer = []
         
-        while True:
-            batch = self.batch_queue.get()
-            if batch is None:
-                break
+        for sample in self.dataset:
+            processed = self._process_sample(sample)
+            if processed is not None:
+                batch_buffer.append(processed)
             
-            yield batch
-            batch_idx += 1
-            
-            # Print profiling stats
-            if self.stats and batch_idx % self.config.profile_interval == 0:
-                self.stats.print_stats(batch_idx)
-    
-    def close(self):
-        """Clean up resources."""
-        self.executor.shutdown(wait=False)
+            # Yield batch when full
+            if len(batch_buffer) >= self.config.batch_size:
+                batch = self._create_batch(batch_buffer[:self.config.batch_size])
+                if batch is not None:
+                    yield batch
+                batch_buffer = batch_buffer[self.config.batch_size:]
+        
+        # Yield remaining samples
+        while batch_buffer:
+            batch_size = min(len(batch_buffer), self.config.batch_size)
+            batch = self._create_batch(batch_buffer[:batch_size])
+            if batch is not None:
+                yield batch
+            batch_buffer = batch_buffer[batch_size:]
 
 
 def create_optimized_emilia_loader(
@@ -402,12 +261,9 @@ def create_optimized_emilia_loader(
     split: str = "train", 
     batch_size: int = 8,
     sample_rate: int = 24000,
-    num_workers: int = 4,
-    prefetch_batches: int = 2,
-    profile: bool = True,
     **kwargs
 ) -> OptimizedAudioLoader:
-    """Create an optimized loader for Emilia dataset."""
+    """Create a simple loader for Emilia dataset."""
     config = AudioConfig(
         dataset_name="amphion/Emilia-Dataset",
         dataset_config="default",  # Emilia uses 'default' config
@@ -415,43 +271,35 @@ def create_optimized_emilia_loader(
         sample_rate=sample_rate,
         batch_size=batch_size,
         streaming=True,  # Always use streaming for large datasets
-        num_workers=num_workers,
-        prefetch_batches=prefetch_batches,
-        profile=profile,
         **kwargs
     )
     return OptimizedAudioLoader(config)
 
 
 def test_optimized_loader():
-    """Test the optimized loader."""
-    print("Testing optimized Emilia loader...")
+    """Test the simple loader."""
+    print("Testing simple Emilia loader...")
     
     loader = create_optimized_emilia_loader(
         batch_size=4,
         max_duration_seconds=5.0,
-        num_workers=4,
-        prefetch_batches=2,
-        profile=True,
-        profile_interval=5
     )
     
-    try:
-        for i, batch in enumerate(loader):
-            if i >= 20:  # Test 20 batches
-                break
-            
-            if i % 5 == 0:
-                print(f"\nBatch {i} shapes:")
-                print(f"  Audio: {batch['audio'].shape}")
-                print(f"  Lengths: {batch['lengths']}")
-                if 'meta_text' in batch:
-                    print(f"  Has text metadata: {len(batch['meta_text'])} samples")
+    for i, batch in enumerate(loader):
+        if i >= 5:  # Test 5 batches
+            break
         
-        print("\nTest completed successfully!")
+        print(f"\nBatch {i} shapes:")
+        print(f"  Audio: {batch['audio'].shape}")
+        print(f"  Lengths: {batch['lengths']}")
+        print(f"  Has text metadata: {len(batch['meta_text'])} samples")
+        print(f"  Languages: {batch['meta_language']}")
         
-    finally:
-        loader.close()
+        # Print first text sample
+        if batch['meta_text'][0]:
+            print(f"  First text: {batch['meta_text'][0][:50]}...")
+    
+    print("\nTest completed successfully!")
 
 
 if __name__ == "__main__":
