@@ -65,13 +65,33 @@ class SimpleEmiliaLoader:
     
     def _process_batch(self, batch: Dict[str, List]) -> Dict[str, Any]:
         """Process a batch - extract audio arrays and metadata only."""
-        # Extract audio arrays
+        # Debug: Print batch keys and types
+        print(f"DEBUG: Batch keys: {list(batch.keys())}")
+        
+        # Extract audio arrays with debugging
         audio_arrays = []
-        for audio_data in batch.get('mp3', []):
-            if isinstance(audio_data, dict) and 'array' in audio_data:
-                # Convert to JAX array
-                audio_array = jnp.array(audio_data['array'], dtype=jnp.float32)
-                audio_arrays.append(audio_array)
+        audio_data_list = batch.get('mp3', [])
+        print(f"DEBUG: Number of mp3 entries: {len(audio_data_list)}")
+        
+        for i, audio_data in enumerate(audio_data_list):
+            print(f"DEBUG: Audio {i} type: {type(audio_data)}")
+            if isinstance(audio_data, dict):
+                print(f"DEBUG: Audio {i} keys: {list(audio_data.keys())}")
+                if 'array' in audio_data:
+                    # Convert to JAX array
+                    audio_array = jnp.array(audio_data['array'], dtype=jnp.float32)
+                    audio_arrays.append(audio_array)
+                    print(f"DEBUG: Audio {i} shape: {audio_array.shape}")
+                else:
+                    print(f"DEBUG: Audio {i} missing 'array' key")
+            else:
+                # Try direct conversion if it's already an array
+                try:
+                    audio_array = jnp.array(audio_data, dtype=jnp.float32)
+                    audio_arrays.append(audio_array)
+                    print(f"DEBUG: Audio {i} converted directly, shape: {audio_array.shape}")
+                except Exception as e:
+                    print(f"DEBUG: Audio {i} conversion failed: {e}")
         
         # Extract metadata
         metadata_list = []
@@ -123,5 +143,45 @@ def test_simple_loader():
     print("\nTest completed!")
 
 
+def test_raw_batch():
+    """Test raw batching like pls_work.py to debug."""
+    print("Testing raw batching like pls_work.py...")
+    
+    ds = load_dataset(
+        "amphion/Emilia-Dataset",
+        "default",
+        split="train",
+        streaming=True
+    )
+    
+    # Test native batching
+    batched = ds.batch(batch_size=4)
+    
+    for i, batch in enumerate(batched):
+        print(f"\nRaw Batch {i}:")
+        print(f"  Type: {type(batch)}")
+        print(f"  Keys: {list(batch.keys())}")
+        
+        # Check each key's content
+        for key in list(batch.keys()):
+            print(f"  {key}: type={type(batch[key])}, length={len(batch[key]) if isinstance(batch[key], list) else 'N/A'}")
+            
+            # Look at first item in detail
+            if isinstance(batch[key], list) and len(batch[key]) > 0:
+                first_item = batch[key][0]
+                print(f"    First item type: {type(first_item)}")
+                if isinstance(first_item, dict):
+                    print(f"    First item keys: {list(first_item.keys())}")
+                elif isinstance(first_item, str):
+                    print(f"    First item preview: {first_item[:50]}...")
+        
+        if i >= 1:  # Just check first 2 batches
+            break
+
+
 if __name__ == "__main__":
+    print("=== Testing raw batch first ===")
+    test_raw_batch()
+    
+    print("\n\n=== Testing simple loader ===")
     test_simple_loader()
