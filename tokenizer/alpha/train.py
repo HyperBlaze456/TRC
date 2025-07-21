@@ -1,7 +1,9 @@
 import sys
 import os
+from dotenv import load_dotenv
 # Add the TRC directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 
 import jax
 import jax.numpy as jnp
@@ -25,6 +27,22 @@ from tokenizer.alpha.components.discriminators import (
     MultiPeriodDiscriminator,
     STFTDiscriminator
 )
+
+load_dotenv()
+hf_token = os.getenv("HF_TOKEN")
+
+# Set token globally for HuggingFace
+if hf_token:
+    print(f"Setting HF token (first 8 chars): {hf_token[:8]}...")
+    try:
+        login(token=hf_token)
+        os.environ["HF_TOKEN"] = hf_token
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        print("HF token set successfully")
+    except Exception as e:
+        print(f"Warning: Failed to login with HF token: {e}")
+else:
+    print("Warning: No HF_TOKEN found in environment")
 
 # Try to import phonemizer for multilingual G2P
 try:
