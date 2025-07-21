@@ -257,7 +257,6 @@ class OptimizedAudioLoader:
 
 
 def create_optimized_emilia_loader(
-    language: str = "EN",
     split: str = "train", 
     batch_size: int = 8,
     sample_rate: int = 24000,
@@ -282,7 +281,7 @@ def test_optimized_loader():
     
     loader = create_optimized_emilia_loader(
         batch_size=4,
-        max_duration_seconds=5.0,
+        max_duration_seconds=6.0,
     )
     
     for i, batch in enumerate(loader):

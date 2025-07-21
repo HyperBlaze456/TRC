@@ -155,7 +155,7 @@ def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
 
 def pad_sequences_left(
         sequences: jax.Array,
-        max_length: Optional[int] = None,
+        max_length: int = None,
         pad_value: float = 0.0
 ) -> Tuple[jax.Array, jax.Array]:
     """Pad sequences with left-padding to create a batch.

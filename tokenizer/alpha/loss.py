@@ -388,7 +388,7 @@ def ctc_loss(
         phoneme_targets: Target phoneme indices [B, max_target_len]
         logit_lengths: Valid lengths for logits [B]
         target_lengths: Valid lengths for targets [B]
-        blank_id: Index for CTC blank token (typically 0)
+        blank_id: Index for CTC blank token (0)
 
     Returns:
         CTC loss value
@@ -799,6 +799,7 @@ def compute_generator_loss(
         disc_features_real: List[List[jax.Array]],
         disc_features_fake: List[List[jax.Array]],
         mask: Optional[jax.Array] = None,
+        encoder_mask: Optional[jax.Array] = None,
         config: Optional[Dict] = None
 ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
     """Compute all generator losses.
@@ -818,7 +819,8 @@ def compute_generator_loss(
         disc_outputs_fake: Discriminator outputs for fake audio
         disc_features_real: Discriminator features for real audio
         disc_features_fake: Discriminator features for fake audio
-        mask: Optional mask [B, 1, 1, T]
+        mask: Optional mask for audio-level losses [B, 1, 1, T]
+        encoder_mask: Optional mask for encoder-level losses [B, 1, 1, T']
         config: Loss configuration weights
 
     Returns:
@@ -850,9 +852,10 @@ def compute_generator_loss(
         pred_audio, target_audio, mask=mask
     )
 
-    # Downsampled mask for encoder-space losses
-    if mask is not None:
-        # Approximate downsampling factor (this should match your model's factor)
+    # Use provided encoder_mask or compute it from audio mask if not provided
+    if encoder_mask is None and mask is not None:
+        # Fallback: compute encoder mask from audio mask
+        # This should ideally be avoided by always providing encoder_mask
         downsample_factor = target_audio.shape[1] // encoder_output.shape[1]
         if mask.ndim == 4:
             mask_1d = mask[:, 0, 0, :]
@@ -865,8 +868,6 @@ def compute_generator_loss(
         indices = jnp.minimum(indices, mask_1d.shape[-1] - 1)
         encoder_mask = mask_1d[:, indices]
         encoder_mask = encoder_mask[:, None, None, :]  # [B, 1, 1, T']
-    else:
-        encoder_mask = None
 
     # CTC loss for phoneme prediction
     ctc_loss_value, _ = phoneme_ctc_loss(
@@ -935,35 +936,6 @@ def compute_discriminator_loss(
 
     return d_loss, losses
 
-
-def create_loss_functions(config: Dict):
-    """Create JIT-compiled loss functions with fixed config.
-
-    Args:
-        config: Loss configuration dictionary
-
-    Returns:
-        Tuple of (generator_loss_fn, discriminator_loss_fn)
-    """
-
-    @jax.jit
-    def generator_loss_fn(
-            pred_audio, target_audio, encoder_output, phoneme_quantized,
-            residual, residual_quantized, phoneme_indices, phoneme_targets,
-            phoneme_codebook, encoder_lengths, target_lengths,
-            disc_outputs_fake, disc_features_real, disc_features_fake, mask
-    ):
-        return compute_generator_loss(
-            pred_audio, target_audio, encoder_output, phoneme_quantized,
-            residual, residual_quantized, phoneme_indices, phoneme_targets,
-            phoneme_codebook, encoder_lengths, target_lengths,
-            disc_outputs_fake, disc_features_real, disc_features_fake,
-            mask, config
-        )
-
-    discriminator_loss_fn = jax.jit(compute_discriminator_loss)
-
-    return generator_loss_fn, discriminator_loss_fn
 
 
 def compute_phoneme_metrics(
