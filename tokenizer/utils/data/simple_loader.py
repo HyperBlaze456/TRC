@@ -48,8 +48,16 @@ class SimpleEmiliaLoader:
             streaming=True
         )
         
+        # Enable multithreaded decoding for faster streaming
+        import os
+        num_threads = min(32, (os.cpu_count() or 1) + 4)
+        print(f"Using {num_threads} threads for audio decoding")
+        
+        # Decode the dataset with multiple threads
+        decoded_dataset = self.dataset.decode(num_threads=num_threads)
+        
         # Use native HuggingFace batching
-        self.batched_dataset = self.dataset.batch(batch_size=batch_size)
+        self.batched_dataset = decoded_dataset.batch(batch_size=batch_size)
         print("Dataset loaded successfully!")
     
     def _extract_metadata(self, json_str: str) -> Dict[str, str]:
@@ -75,7 +83,20 @@ class SimpleEmiliaLoader:
         
         for i, audio_data in enumerate(audio_data_list):
             print(f"DEBUG: Audio {i} type: {type(audio_data)}")
-            if isinstance(audio_data, dict):
+            
+            # Handle AudioDecoder objects
+            if hasattr(audio_data, 'get_all_samples'):
+                try:
+                    # This is an AudioDecoder object
+                    samples = audio_data.get_all_samples()
+                    audio_array = jnp.array(samples.data, dtype=jnp.float32)
+                    audio_arrays.append(audio_array)
+                    print(f"DEBUG: Audio {i} decoded from AudioDecoder, shape: {audio_array.shape}, sr: {samples.sample_rate}")
+                except Exception as e:
+                    print(f"DEBUG: Audio {i} AudioDecoder decoding failed: {e}")
+            
+            # Handle dict format (older HuggingFace format)
+            elif isinstance(audio_data, dict):
                 print(f"DEBUG: Audio {i} keys: {list(audio_data.keys())}")
                 if 'array' in audio_data:
                     # Convert to JAX array
@@ -84,8 +105,9 @@ class SimpleEmiliaLoader:
                     print(f"DEBUG: Audio {i} shape: {audio_array.shape}")
                 else:
                     print(f"DEBUG: Audio {i} missing 'array' key")
+            
+            # Try direct conversion if it's already an array
             else:
-                # Try direct conversion if it's already an array
                 try:
                     audio_array = jnp.array(audio_data, dtype=jnp.float32)
                     audio_arrays.append(audio_array)
