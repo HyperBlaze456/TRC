@@ -1,7 +1,7 @@
 import sys
 import os
 # Add the TRC directory to Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
 
 import jax
 import jax.numpy as jnp
