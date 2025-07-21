@@ -1,6 +1,7 @@
 import sys
 import os
 from dotenv import load_dotenv
+from huggingface_hub import login
 # Add the TRC directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
