@@ -439,60 +439,83 @@ def train_stftd_step(
     return loss, loss_dict
 
 
-def create_multilingual_g2p():
-    """Create a multilingual G2P function using phonemizer."""
+def create_multilingual_g2p(possible_phonemes=None):
+    """Create a multilingual G2P function using phonemizer with proper phoneme tokenization.
+    
+    Args:
+        possible_phonemes: List of possible phoneme symbols for tokenization
+        
+    Returns:
+        G2P function that converts text to phoneme sequences
+    """
     if not PHONEMIZER_AVAILABLE:
         return None
+    
+    # Sort phonemes by length (longest first) for proper tokenization
+    if possible_phonemes is None:
+        possible_phonemes = globals()['possible_phonemes']
+    
+    # Create a sorted list for longest-match-first tokenization
+    sorted_phonemes = sorted(possible_phonemes, key=len, reverse=True)
 
-    # Language mapping for Emilia dataset
-    language_map = {
-        'EN': 'en-us',
-        'ZH': 'zh',
-        'JA': 'ja',
-        'FR': 'fr-fr',
-        'DE': 'de',
-        'KO': 'ko',
-        'ES': 'es',
-        'IT': 'it',
-        'PT': 'pt',
-        'RU': 'ru',
-    }
+    def tokenize_phonemes(phoneme_string):
+        """Tokenize phoneme string into individual phonemes using longest-match-first."""
+        if not phoneme_string:
+            return []
+        
+        tokens = []
+        i = 0
+        
+        while i < len(phoneme_string):
+            # Skip whitespace
+            if phoneme_string[i] in ' \n\r\t':
+                i += 1
+                continue
+                
+            # Try to match longest phoneme first
+            matched = False
+            for phoneme in sorted_phonemes:
+                if phoneme_string[i:i+len(phoneme)] == phoneme:
+                    tokens.append(phoneme)
+                    i += len(phoneme)
+                    matched = True
+                    break
+            
+            if not matched:
+                # Unknown character, skip it
+                i += 1
+                
+        return tokens if tokens else ['UNK']
 
-    def g2p_function(text, language='EN'):
-        """Convert text to phonemes using phonemizer.
+    def g2p_function(text, locale='en-us'):
+        """Convert text to phonemes using phonemizer with espeak backend.
 
         Args:
             text: Input text
-            language: Language code from dataset (e.g., 'EN', 'ZH', 'JA')
+            locale: Language locale (e.g., 'en-us', 'zh', 'ja', 'fr-fr', 'de', 'ko')
 
         Returns:
             List of phoneme symbols
         """
-        # Map dataset language code to phonemizer language
-        phonemizer_lang = language_map.get(language, 'en-us')
-
         try:
             # Use phonemizer for IPA conversion
-            phonemes = phonemize(
+            phoneme_string = phonemize(
                 text,
-                language=phonemizer_lang,
-                backend='espeak',  # espeak supports most languages
+                language=locale,
+                backend='espeak',
                 strip=True,
                 preserve_punctuation=False,
                 with_stress=False,
-                njobs=1,  # Single-threaded for stability
+                njobs=1,
             )
-            # Convert IPA string to list of phonemes
-            # This is a simplified tokenization - you may want to improve this
-            phoneme_list = []
-            for char in phonemes:
-                if char not in [' ', '\n', '\r', '\t']:
-                    phoneme_list.append(char)
-            return phoneme_list if phoneme_list else ['<unk>']
+            
+            # Tokenize into individual phonemes
+            return tokenize_phonemes(phoneme_string)
+            
         except Exception as e:
-            print(f"G2P error for language {language}: {e}")
-            # Fallback to character-based tokenization
-            return list(text) if text else ['<unk>']
+            print(f"G2P error for locale {locale}: {e}")
+            # Return UNK token on error
+            return ['UNK']
 
     return g2p_function
 
@@ -517,9 +540,19 @@ def prepare_phoneme_targets_from_metadata(
     """
     batch_size = batch['audio'].shape[0]
 
-    # Extract text and language metadata
+    # Extract text and locale metadata
     texts = batch.get('meta_text', [None] * batch_size)
-    languages = batch.get('meta_language', ['EN'] * batch_size)
+    locales = batch.get('meta_language', ['en-us'] * batch_size)
+    
+    # Map language codes to locales if needed
+    locale_map = {
+        'EN': 'en-us',
+        'ZH': 'zh',
+        'JA': 'ja',
+        'FR': 'fr',
+        'DE': 'de',
+        'KO': 'ko',
+    }
 
     # Convert texts to phonemes
     all_phoneme_indices = []
@@ -527,32 +560,36 @@ def prepare_phoneme_targets_from_metadata(
 
     for i in range(batch_size):
         text = texts[i]
-        language = languages[i] if languages[i] else 'EN'
+        locale = locales[i] if locales[i] else 'en-us'
+        
+        # Convert language code to locale if needed
+        if locale in locale_map:
+            locale = locale_map[locale]
 
         if text and g2p_function:
-            # Convert text to phonemes
-            phonemes = g2p_function(text, language)
+            # Convert text to phonemes using the locale
+            phonemes = g2p_function(text, locale)
 
             # Convert phonemes to indices
             phoneme_indices = []
-            for phoneme in phonemes[:max_phoneme_length - 2]:  # Leave room for special tokens
-                idx = phoneme_vocab.get(phoneme, phoneme_vocab.get('<unk>', 0))
+            for phoneme in phonemes[:max_phoneme_length]:
+                idx = phoneme_vocab.get(phoneme, phoneme_vocab.get('UNK', 1))
                 phoneme_indices.append(idx)
-
-            # Add EOS token
-            if '<eos>' in phoneme_vocab:
-                phoneme_indices.append(phoneme_vocab['<eos>'])
 
             all_phoneme_indices.append(phoneme_indices)
             all_lengths.append(len(phoneme_indices))
         else:
-            # Fallback: use a dummy sequence
+            # Fallback: use a dummy sequence with UNK tokens
             dummy_length = min(10, max_phoneme_length)
-            all_phoneme_indices.append([phoneme_vocab.get('<unk>', 0)] * dummy_length)
+            all_phoneme_indices.append([phoneme_vocab.get('UNK', 1)] * dummy_length)
             all_lengths.append(dummy_length)
 
     # Pad sequences to max length (right padding for CTC)
-    max_length = min(max(all_lengths), max_phoneme_length)
+    if all_lengths:
+        max_length = min(max(all_lengths), max_phoneme_length)
+    else:
+        max_length = max_phoneme_length
+        
     padded_targets = []
 
     for indices in all_phoneme_indices:
@@ -670,7 +707,7 @@ def main():
         'hidden_size': 512,
         'encoder_depth': 4,
         'encoder_heads': 8,
-        'phoneme_codebook_size': 100,
+        'phoneme_codebook_size': 155,  # 152 phonemes + 3 special tokens (blank, unk, pad)
         'bsq_spherical_dim': 256,
         'decoder_output_48khz': False,
 
@@ -713,12 +750,13 @@ def main():
     )
 
     # Setup multilingual G2P if available
-    g2p_fn = create_multilingual_g2p()
+    g2p_fn = create_multilingual_g2p(possible_phonemes)
     if g2p_fn:
         print("Multilingual G2P ready (phonemizer)")
-        # Create phoneme vocabulary for multiple languages
-        # This would be extended with phonemes from all target languages
-        phoneme_vocab = create_phoneme_vocabulary()
+        # Create phoneme vocabulary using the comprehensive phoneme list
+        phoneme_vocab = create_phoneme_vocabulary(possible_phonemes)
+        print(f"Phoneme vocabulary size: {len(phoneme_vocab)} "
+              f"({len(possible_phonemes)} phonemes + 3 special tokens)")
     else:
         print("G2P not available, using dummy phoneme targets")
         phoneme_vocab = None

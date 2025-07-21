@@ -639,7 +639,7 @@ def edit_distance(seq1: jax.Array, seq2: jax.Array) -> float:
 # ============================================================================
 
 def create_phoneme_vocabulary(
-        ipa_symbols: Optional[List[str]] = None,
+        possible_phonemes: Optional[List[str]] = None,
         blank_token: str = "_",
         unk_token: str = "UNK",
         pad_token: str = "PAD"
@@ -647,7 +647,7 @@ def create_phoneme_vocabulary(
     """Create phoneme vocabulary mapping symbols to indices.
 
     Args:
-        ipa_symbols: List of IPA phoneme symbols (uses common set if None)
+        possible_phonemes: List of possible phoneme symbols from dataset
         blank_token: CTC blank token
         unk_token: Unknown phoneme token
         pad_token: Padding token
@@ -655,23 +655,19 @@ def create_phoneme_vocabulary(
     Returns:
         Dictionary mapping phoneme symbols to indices
     """
-    if ipa_symbols is None:
-        # Common IPA symbols for English (can be extended for multilingual)
-        ipa_symbols = [
-            # Vowels
-            'i', 'ɪ', 'e', 'ɛ', 'æ', 'a', 'ɑ', 'ɔ', 'o', 'ʊ', 'u',
-            'ə', 'ɚ', 'ɝ', 'ʌ',
-            # Diphthongs
-            'eɪ', 'aɪ', 'ɔɪ', 'aʊ', 'oʊ',
-            # Consonants
-            'p', 'b', 't', 'd', 'k', 'g', 'ʔ',
-            'f', 'v', 'θ', 'ð', 's', 'z', 'ʃ', 'ʒ', 'h',
-            'm', 'n', 'ŋ',
-            'l', 'ɹ', 'j', 'w',
-            'tʃ', 'dʒ',
-            # Stress and syllable markers
-            'ˈ', 'ˌ', '.',
-            # Additional symbols for other languages can be added
+    if possible_phonemes is None:
+        # Default Emilia dataset phonemes for multilingual support
+        possible_phonemes = [
+            "N", "a", "ai", "an", "au", "aı", "aŋ", "aɔ", "aː", "b", "bʲ", "d", "dz", "dʑ", "dʒ", "d͡ʑ",
+            "e", "ei", "eɪ", "eː", "f", "g", "gʲ", "h", "i", "ia", "iau", "in", "iç", "iŋ", "iən", "iəu",
+            "iɛ", "iʊŋ", "iː", "i̥", "j", "ja", "je", "jo", "ju", "jɛ", "jʌ", "k", "kʰ", "kʲ", "k͈", "l",
+            "m", "mʲ", "n", "nʲ", "o", "ou", "oʊ", "oː", "o̯e", "p", "pf", "pʰ", "pʲ", "p͈", "r", "s", "s͈",
+            "t", "ts", "tsʰ", "tɕ", "tɕʰ", "tʃ", "tʰ", "t͈", "t͡ɕ", "t͡ɕʰ", "t͡ɕ͈", "u", "ua", "uai", "uan",
+            "uaŋ", "uŋ", "uəi", "uən", "uː", "u̥", "v", "w", "wa", "we", "wi", "wɛ", "wʌ", "x", "y", "yn",
+            "yən", "yɛ", "yʊŋ", "yː", "z", "æ", "ç", "ð", "ø", "øː", "ı", "ŋ", "œ", "œ̃", "ɑ", "ɑɪ", "ɑʊ",
+            "ɑ̃", "ɔ", "ɔø", "ɔɪ", "ɔ̃", "ɕ", "ə", "ən", "əu", "ɚ", "ɛ", "ɛɹ", "ɛː", "ɛ̃", "ɝ", "ɤ", "ɥ",
+            "ɪ", "ɪɹ", "ɯ", "ɰi", "ɲ", "ɸ", "ɹ", "ɻ", "ɾ", "ɾʲ", "ʀ", "ʁ", "ʂ", "ʃ", "ʈʂ", "ʈʂʰ", "ʊ",
+            "ʊŋ", "ʊɹ", "ʌ", "ʒ", "θ"
         ]
 
     # Build vocabulary with special tokens first
@@ -681,8 +677,8 @@ def create_phoneme_vocabulary(
         pad_token: 2,
     }
 
-    # Add IPA symbols
-    for i, symbol in enumerate(ipa_symbols):
+    # Add phoneme symbols
+    for i, symbol in enumerate(possible_phonemes):
         vocab[symbol] = i + 3
 
     return vocab
