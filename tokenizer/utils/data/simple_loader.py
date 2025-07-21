@@ -9,8 +9,6 @@ import jax.numpy as jnp
 from typing import Dict, List, Optional, Iterator, Any
 import json
 
-from tokenizer.alpha.mask_utils import pad_sequences_left, create_padding_mask, create_encoder_masks
-
 # Load environment variables
 load_dotenv()
 hf_token = os.getenv("HF_TOKEN")
@@ -28,7 +26,7 @@ if hf_token:
 
 
 class SimpleEmiliaLoader:
-    """Simple loader that uses native batching and adds preprocessing."""
+    """Simple loader that processes batches without padding."""
     
     def __init__(
         self,
@@ -41,7 +39,7 @@ class SimpleEmiliaLoader:
         self.sample_rate = sample_rate
         self.max_samples = int(max_duration_seconds * sample_rate)
         
-        # Load dataset exactly like pls_work.py - no preprocessing!
+        # Load dataset exactly like pls_work.py
         print(f"Loading Emilia dataset (split: {split})...")
         self.dataset = load_dataset(
             "amphion/Emilia-Dataset",
@@ -53,177 +51,71 @@ class SimpleEmiliaLoader:
         # Use native HuggingFace batching
         self.batched_dataset = self.dataset.batch(batch_size=batch_size)
         print("Dataset loaded successfully!")
-        
-        # For Emilia dataset, we know the columns
-        self.audio_column = 'mp3'  # Emilia uses mp3 column
-        self.metadata_column = 'json'  # Emilia uses json column
     
-    def _process_audio_batch(self, audio_list: List[Any]) -> Optional[List[jnp.ndarray]]:
-        """Process a batch of audio data."""
-        processed_audios = []
-        
-        for audio_data in audio_list:
-            try:
-                # Handle HuggingFace Audio feature format
-                if isinstance(audio_data, dict) and 'array' in audio_data:
-                    audio_array = jnp.array(audio_data['array'], dtype=jnp.float32)
-                    sr = audio_data.get('sampling_rate', self.sample_rate)
-                    
-                    # TODO: Add proper resampling if needed
-                    if sr != self.sample_rate and sr > 0:
-                        # For now, skip samples with wrong sample rate
-                        continue
-                    
-                    # Convert to mono if needed
-                    if audio_array.ndim > 1:
-                        audio_array = jnp.mean(audio_array, axis=0)
-                    
-                    # Truncate if too long
-                    if len(audio_array) > self.max_samples:
-                        audio_array = audio_array[:self.max_samples]
-                    
-                    # Normalize
-                    max_val = jnp.abs(audio_array).max()
-                    if max_val > 0:
-                        audio_array = audio_array * (0.95 / max_val)
-                    
-                    processed_audios.append(audio_array)
-                    
-            except Exception as e:
-                print(f"Audio processing error: {e}")
-                continue
-        
-        return processed_audios if processed_audios else None
+    def _extract_metadata(self, json_str: str) -> Dict[str, str]:
+        """Extract text and locale from JSON metadata."""
+        try:
+            metadata = json.loads(json_str)
+            return {
+                'text': metadata.get('text', ''),
+                'locale': metadata.get('language', metadata.get('locale', 'EN'))
+            }
+        except:
+            return {'text': '', 'locale': 'EN'}
     
-    def _parse_metadata_batch(self, metadata_list: List[Any]) -> tuple:
-        """Parse metadata from batch."""
-        texts = []
-        languages = []
+    def _process_batch(self, batch: Dict[str, List]) -> Dict[str, Any]:
+        """Process a batch - extract audio arrays and metadata only."""
+        # Extract audio arrays
+        audio_arrays = []
+        for audio_data in batch.get('mp3', []):
+            if isinstance(audio_data, dict) and 'array' in audio_data:
+                # Convert to JAX array
+                audio_array = jnp.array(audio_data['array'], dtype=jnp.float32)
+                audio_arrays.append(audio_array)
         
-        for metadata in metadata_list:
-            text = None
-            language = 'EN'
-            
-            try:
-                if isinstance(metadata, str):
-                    metadata_dict = json.loads(metadata)
-                    text = metadata_dict.get('text', '')
-                    language = metadata_dict.get('language', metadata_dict.get('locale', 'EN'))
-                elif isinstance(metadata, dict):
-                    text = metadata.get('text', '')
-                    language = metadata.get('language', metadata.get('locale', 'EN'))
-            except:
-                pass
-            
-            texts.append(text or '')
-            languages.append(language)
+        # Extract metadata
+        metadata_list = []
+        for json_str in batch.get('json', []):
+            metadata_list.append(self._extract_metadata(json_str))
         
-        return texts, languages
-    
-    def _create_batch_dict(self, batch: Dict[str, List]) -> Optional[Dict[str, Any]]:
-        """Create a properly formatted batch dictionary with padding and masks."""
-        # Process audio
-        if self.audio_column not in batch:
-            return None
-            
-        audio_list = self._process_audio_batch(batch[self.audio_column])
-        if not audio_list:
-            return None
-        
-        # Get lengths
-        lengths = [len(audio) for audio in audio_list]
-        max_length = max(lengths)
-        
-        # Make divisible by downsample factor
-        downsample_factor = 480 if self.sample_rate == 24000 else 960
-        if max_length % downsample_factor != 0:
-            max_length = ((max_length // downsample_factor) + 1) * downsample_factor
-        
-        # Pad sequences (left-padding)
-        padded_audio, _ = pad_sequences_left(
-            audio_list,
-            max_length=max_length,
-            pad_value=0.0
-        )
-        
-        # Add channel dimension [B, T, 1]
-        audio_batch = padded_audio[:, :, None]
-        
-        # Create lengths array
-        lengths_array = jnp.array(lengths, dtype=jnp.int32)
-        
-        # Create masks
-        mask = create_padding_mask(lengths_array, max_length, causal=False)
-        
-        # Create encoder-level masks
-        encoder_mask, encoder_causal_mask = create_encoder_masks(
-            lengths_array, max_length, downsample_factor
-        )
-        
-        # Parse metadata
-        texts, languages = [], []
-        if self.metadata_column in batch:
-            texts, languages = self._parse_metadata_batch(batch[self.metadata_column])
+        # Extract texts and locales
+        texts = [m['text'] for m in metadata_list]
+        locales = [m['locale'] for m in metadata_list]
         
         return {
-            'audio': audio_batch,
-            'lengths': lengths_array,
-            'mask': mask,
-            'encoder_mask': encoder_mask,
-            'encoder_causal_mask': encoder_causal_mask,
-            'meta_text': texts,
-            'meta_language': languages,
+            'audio': audio_arrays,  # List of JAX arrays (different lengths)
+            'text': texts,
+            'locale': locales,
+            'batch_size': len(audio_arrays)
         }
     
     def __iter__(self) -> Iterator[Dict[str, Any]]:
-        """Iterate over processed batches."""
+        """Iterate over batches."""
         for batch in self.batched_dataset:
-            # batch is a dict with lists as values
-            processed_batch = self._create_batch_dict(batch)
-            if processed_batch is not None:
-                yield processed_batch
-
-
-def create_emilia_loader(
-    split: str = "train",
-    batch_size: int = 8,
-    sample_rate: int = 24000,
-    max_duration_seconds: float = 10.0,
-) -> SimpleEmiliaLoader:
-    """Create a simple Emilia dataset loader."""
-    return SimpleEmiliaLoader(
-        split=split,
-        batch_size=batch_size,
-        sample_rate=sample_rate,
-        max_duration_seconds=max_duration_seconds,
-    )
+            yield self._process_batch(batch)
 
 
 def test_simple_loader():
-    """Test the simple loader with preprocessing."""
-    print("Testing simple Emilia loader with preprocessing...")
+    """Test the simple loader."""
+    print("Testing simple Emilia loader...")
     
     loader = SimpleEmiliaLoader(
         split="train",
-        batch_size=8,
+        batch_size=4,
         sample_rate=24000,
-        max_duration_seconds=6.0,
     )
     
-    # Test iteration - should start immediately!
+    # Test iteration
     for i, batch in enumerate(loader):
         print(f"\nBatch {i}:")
-        print(f"  Audio shape: {batch['audio'].shape}")
-        print(f"  Lengths: {batch['lengths']}")
-        print(f"  Mask shape: {batch['mask'].shape}")
-        print(f"  Encoder mask shape: {batch['encoder_mask'].shape}")
-        print(f"  Encoder causal mask shape: {batch['encoder_causal_mask'].shape}")
-        print(f"  Number of texts: {len(batch['meta_text'])}")
-        print(f"  Languages: {batch['meta_language']}")
+        print(f"  Number of audio samples: {batch['batch_size']}")
+        print(f"  Audio shapes: {[a.shape for a in batch['audio']]}")
+        print(f"  Number of texts: {len(batch['text'])}")
+        print(f"  Locales: {batch['locale']}")
         
         # Show first text if available
-        if batch['meta_text'] and batch['meta_text'][0]:
-            print(f"  First text: {batch['meta_text'][0][:50]}...")
+        if batch['text'] and batch['text'][0]:
+            print(f"  First text: {batch['text'][0][:50]}...")
         
         if i >= 2:  # Test a few batches
             break
