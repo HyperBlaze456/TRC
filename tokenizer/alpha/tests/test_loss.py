@@ -13,7 +13,6 @@ from tokenizer.alpha.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
     create_phoneme_vocabulary,
-    prepare_phoneme_targets
 )
 
 

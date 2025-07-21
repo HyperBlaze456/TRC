@@ -18,7 +18,6 @@ from tokenizer.alpha.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
     create_phoneme_vocabulary,
-    prepare_phoneme_targets,
     extract_encoder_lengths
 )
 from tokenizer.alpha.components.discriminators import (
@@ -739,19 +738,14 @@ def main():
     print("Creating models...")
     state = create_models_and_optimizers(config, rngs)
 
-    # Create optimized data loader with parallel processing
-    print("Creating optimized Emilia data loader with parallel MP3 decoding...")
+    # Create optimized data loader
+    print("Creating optimized Emilia data loader...")
     from tokenizer.utils.data.optimized_loader import create_optimized_emilia_loader
     data_loader = create_optimized_emilia_loader(
-        language="EN",  # Start with English, can be changed to other languages
         split="train",
         sample_rate=config['sample_rate'],
         batch_size=config['batch_size'],
         max_duration_seconds=config['max_duration_seconds'],
-        num_workers=config.get('decode_workers', 4),  # Parallel MP3 decoders
-        prefetch_batches=config.get('prefetch_batches', 2),  # Prefetch batches
-        profile=True,  # Enable profiling to debug bottlenecks
-        profile_interval=10  # Print stats every 10 batches
     )
 
     # Setup multilingual G2P if available

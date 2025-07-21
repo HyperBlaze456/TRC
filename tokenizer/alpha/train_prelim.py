@@ -4,7 +4,6 @@ from flax import nnx
 import optax
 from typing import Dict, Any, Tuple, Optional
 import time
-from functools import partial
 
 # Import our modules
 from tokenizer.alpha.model import AudioTokenizer
@@ -12,7 +11,6 @@ from tokenizer.alpha.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
     create_phoneme_vocabulary,
-    prepare_phoneme_targets,
     extract_encoder_lengths
 )
 from tokenizer.alpha.components.discriminators import (
