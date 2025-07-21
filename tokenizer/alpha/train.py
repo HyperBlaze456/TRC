@@ -32,6 +32,18 @@ except ImportError:
     PHONEMIZER_AVAILABLE = False
     print("Warning: phonemizer not available. Using dummy phoneme targets.")
 
+possible_phonemes = [ # Emilia has 'zh', 'en-us', 'ja', 'fr', 'ge', 'ko']
+        "N", "a", "ai", "an", "au", "aı", "aŋ", "aɔ", "aː", "b", "bʲ", "d", "dz", "dʑ", "dʒ", "d͡ʑ",
+        "e", "ei", "eɪ", "eː", "f", "g", "gʲ", "h", "i", "ia", "iau", "in", "iç", "iŋ", "iən", "iəu",
+        "iɛ", "iʊŋ", "iː", "i̥", "j", "ja", "je", "jo", "ju", "jɛ", "jʌ", "k", "kʰ", "kʲ", "k͈", "l",
+        "m", "mʲ", "n", "nʲ", "o", "ou", "oʊ", "oː", "o̯e", "p", "pf", "pʰ", "pʲ", "p͈", "r", "s", "s͈",
+        "t", "ts", "tsʰ", "tɕ", "tɕʰ", "tʃ", "tʰ", "t͈", "t͡ɕ", "t͡ɕʰ", "t͡ɕ͈", "u", "ua", "uai", "uan",
+        "uaŋ", "uŋ", "uəi", "uən", "uː", "u̥", "v", "w", "wa", "we", "wi", "wɛ", "wʌ", "x", "y", "yn",
+        "yən", "yɛ", "yʊŋ", "yː", "z", "æ", "ç", "ð", "ø", "øː", "ı", "ŋ", "œ", "œ̃", "ɑ", "ɑɪ", "ɑʊ",
+        "ɑ̃", "ɔ", "ɔø", "ɔɪ", "ɔ̃", "ɕ", "ə", "ən", "əu", "ɚ", "ɛ", "ɛɹ", "ɛː", "ɛ̃", "ɝ", "ɤ", "ɥ",
+        "ɪ", "ɪɹ", "ɯ", "ɰi", "ɲ", "ɸ", "ɹ", "ɻ", "ɾ", "ɾʲ", "ʀ", "ʁ", "ʂ", "ʃ", "ʈʂ", "ʈʂʰ", "ʊ",
+        "ʊŋ", "ʊɹ", "ʌ", "ʒ", "θ"
+    ]
 
 @dataclass
 class TrainingState:
@@ -144,6 +156,7 @@ def create_models_and_optimizers(
     )
 
 
+@partial(nnx.jit, static_argnums=(4,))
 def train_generator_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -306,6 +319,7 @@ def train_generator_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_msd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -345,6 +359,7 @@ def train_msd_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_mpd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -384,6 +399,7 @@ def train_mpd_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_stftd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
