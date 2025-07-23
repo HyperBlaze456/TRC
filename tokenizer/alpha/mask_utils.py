@@ -154,7 +154,7 @@ def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
 
 
 def pad_sequences_left(
-        sequences: jax.Array,
+        sequences: list[jax.Array],
         max_length: int = None,
         pad_value: float = 0.0
 ) -> Tuple[jax.Array, jax.Array]:
@@ -169,28 +169,23 @@ def pad_sequences_left(
         padded: Padded sequences [B, max_length, ...]
         lengths: Original lengths of sequences [B]
     """
-    if isinstance(sequences, list):
-        # Convert list of arrays to padded array
-        lengths = jnp.array([len(seq) for seq in sequences])
-        if max_length is None:
-            max_length = int(lengths.max())
+    # Convert list of arrays to padded array
+    lengths = jnp.array([len(seq) for seq in sequences])
+    if max_length is None:
+        max_length = int(lengths.max())
 
         # Pad each sequence
-        padded_list = []
-        for seq in sequences:
-            seq_len = len(seq)
-            if seq_len < max_length:
-                pad_width = [(max_length - seq_len, 0)] + [(0, 0)] * (seq.ndim - 1)
-                padded_seq = jnp.pad(seq, pad_width, constant_values=pad_value)
-            else:
-                padded_seq = seq[:max_length]
-            padded_list.append(padded_seq)
+    padded_list = []
+    for seq in sequences:
+        seq_len = len(seq)
+        if seq_len < max_length:
+            pad_width = [(max_length - seq_len, 0)] + [(0, 0)] * (seq.ndim - 1)
+            padded_seq = jnp.pad(seq, pad_width, constant_values=pad_value)
+        else:
+            padded_seq = seq[:max_length]
+        padded_list.append(padded_seq)
 
-        padded = jnp.stack(padded_list)
-    else:
-        # Assume it's already an array, just return it with lengths
-        lengths = jnp.array([sequences.shape[1]] * sequences.shape[0])
-        padded = sequences
+    padded = jnp.stack(padded_list)
 
     return padded, lengths
 

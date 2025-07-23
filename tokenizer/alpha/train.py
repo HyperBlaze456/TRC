@@ -190,7 +190,7 @@ def train_generator_step(
     """Single generator training step using nnx transforms."""
 
     audio = batch['audio']
-    mask = batch['mask']  # Audio-level non-causal padding mask for losses
+    mask = batch['padding_mask']  # Audio-level non-causal padding mask for losses
     encoder_mask = batch.get('encoder_mask', mask)  # Encoder-level non-causal mask
     encoder_causal_mask = batch.get('encoder_causal_mask', encoder_mask)  # Encoder-level causal mask
 
@@ -350,7 +350,7 @@ def train_msd_step(
     """Multi-Scale Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(msd):
@@ -390,7 +390,7 @@ def train_mpd_step(
     """Multi-Period Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(mpd):
@@ -430,7 +430,7 @@ def train_stftd_step(
     """STFT Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(stftd):
@@ -564,17 +564,17 @@ def prepare_phoneme_targets_from_metadata(
     batch_size = batch['audio'].shape[0]
 
     # Extract text and locale metadata
-    texts = batch.get('meta_text', [None] * batch_size)
-    locales = batch.get('meta_language', ['en-us'] * batch_size)
+    texts = batch.get('text', [None] * batch_size)
+    locales = batch.get('language', ['en-us'] * batch_size)
     
     # Map language codes to locales if needed
     locale_map = {
-        'EN': 'en-us',
-        'ZH': 'zh',
-        'JA': 'ja',
-        'FR': 'fr',
-        'DE': 'de',
-        'KO': 'ko',
+        'en': 'en-us',
+        'zh': 'zh',
+        'ja': 'ja',
+        'fr': 'fr',
+        'de': 'de',
+        'ko': 'ko',
     }
 
     # Convert texts to phonemes
@@ -757,15 +757,21 @@ def main():
     print("Creating models...")
     state = create_models_and_optimizers(config, rngs)
 
-    # Create optimized data loader
-    print("Creating optimized Emilia data loader...")
-    from tokenizer.utils.data.optimized_loader import create_optimized_emilia_loader
-    data_loader = create_optimized_emilia_loader(
+    # Create HuggingFace data loader
+    print("Creating HuggingFace Emilia data loader...")
+    from tokenizer.utils.data.simple_loader import create_emilia_ds, AudioConfig
+    
+    audio_config = AudioConfig(
+        dataset_name="amphion/Emilia-Dataset",
+        dataset_config="default",
         split="train",
         sample_rate=config['sample_rate'],
         batch_size=config['batch_size'],
-        max_duration_seconds=config['max_duration_seconds'],
+        unified=config['max_duration_seconds'],
+        streaming=True,
     )
+    
+    data_loader = create_emilia_ds(audio_config)
 
     # Setup multilingual G2P if available
     g2p_fn = create_multilingual_g2p(possible_phonemes)

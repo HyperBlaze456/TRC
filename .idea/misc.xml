@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Python 3.13" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.10.12 WSL (Ubuntu-22.04): (/usr/programming/uv/machine_learning/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.12.10 (sftp://worker9@218.153.32.129:39922/home/worker9/hyperblaze/TRC/.venv/bin/python)" project-jdk-type="Python SDK" />
 </project>
