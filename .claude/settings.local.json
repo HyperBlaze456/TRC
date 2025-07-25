@@ -6,7 +6,8 @@
       "Bash(python:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:arxiv.org)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "WebFetch(domain:optax.readthedocs.io)"
     ],
     "deny": []
   }

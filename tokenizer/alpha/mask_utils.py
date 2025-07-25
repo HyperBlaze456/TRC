@@ -66,8 +66,8 @@ def create_encoder_masks(
         dtype: Data type for the mask
         
     Returns:
-        encoder_mask: Non-causal padding mask at encoder resolution [B, 1, 1, T']
-        encoder_causal_mask: Causal mask at encoder resolution [B, 1, T', T']
+        encoder_mask: Non-causal padding mask at encoder resolution [B, T']
+        encoder_causal_mask: Causal mask at encoder resolution [B, T', T']
     """
     batch_size = lengths.shape[0]
     encoder_max_length = max_length // downsample_factor
@@ -82,8 +82,8 @@ def create_encoder_masks(
     # Create padding mask at encoder resolution
     padding_mask = positions < encoder_lengths[:, None]  # [B, T']
     
-    # Non-causal mask for encoder
-    encoder_mask = padding_mask[:, None, None, :]  # [B, 1, 1, T']
+    # Non-causal mask for encoder (2D)
+    encoder_mask = padding_mask  # [B, T']
     
     # Causal mask at encoder resolution (much smaller than audio resolution)
     causal_mask = jnp.tril(jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype))  # [T', T']
@@ -91,7 +91,6 @@ def create_encoder_masks(
     # Combine with padding mask
     padding_mask_expanded = padding_mask[:, None, :]  # [B, 1, T']
     encoder_causal_mask = padding_mask_expanded & causal_mask[None, :, :]  # [B, T', T']
-    encoder_causal_mask = encoder_causal_mask[:, None, :, :]  # [B, 1, T', T']
     
     return encoder_mask.astype(dtype), encoder_causal_mask.astype(dtype)
 

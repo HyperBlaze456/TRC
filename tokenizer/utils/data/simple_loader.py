@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import warnings
 
 from tokenizer.alpha.mask_utils import pad_sequences_left, create_padding_mask, create_encoder_masks
+from tokenizer.utils.data.phoneme_utils import batch_text_to_phoneme_arrays
 
 warnings.filterwarnings('ignore', category=UserWarning)
 
@@ -39,6 +40,8 @@ class AudioConfig:
     unified: float = 30.0 # later on, this will serve efficient packing, but this is too complicated ngl
     streaming: bool = True
 
+# Removed IPA symbols list - now using phoneme_utils.py
+
 def extract_text_language(batch):
     """Extract language and text from json column."""
     return {
@@ -47,18 +50,16 @@ def extract_text_language(batch):
     }
 
 def process_audio_batch(batch):
-    """Process audio batch with left-padding and create masks.
+    """Process audio batch with left-padding, create masks, and convert text to phonemes.
 
     Args:
         batch: Dataset batch containing 'mp3' audio data and text/language fields
 
     Returns:
-        dict: Processed batch with padded audio and masks
+        dict: Processed batch with padded audio, masks, and phoneme arrays
     """
     # Extract audio arrays from the batch
     # batch['mp3'] is a list of dicts with 'array' key
-    print(len(batch['mp3']))
-    print(batch['mp3'][0])
     audio_arrays = [item['array'] for item in batch['mp3']]
 
     # Add channel dimension if not present (assume mono audio)
@@ -87,15 +88,22 @@ def process_audio_batch(batch):
         downsample_factor=downsample_factor
     )
 
-    # Return processed batch
+    # Convert text to phonemes
+    phoneme_indices, phoneme_mask, phoneme_lengths = batch_text_to_phoneme_arrays(
+        texts=batch['text'],
+        languages=batch['language']
+    )
+
+    # Return processed batch with phonemes (no text/language)
     return {
         'audio': padded_audio,  # [B, T, C]
         'lengths': lengths,  # [B]
         'padding_mask': padding_mask,  # [B, 1, 1, T]
-        'encoder_mask': encoder_mask,  # [B, 1, 1, T']
-        'encoder_causal_mask': encoder_causal_mask,  # [B, 1, T', T']
-        'language': batch['language'],
-        'text': batch['text']
+        'encoder_mask': encoder_mask,  # [B, T']
+        'encoder_causal_mask': encoder_causal_mask,  # [B, T', T']
+        'phonemes': phoneme_indices,  # [B, L] - phoneme token indices
+        'phoneme_mask': phoneme_mask,  # [B, L] - CTC padding (1.0 = padded, 0.0 = valid)
+        'phoneme_lengths': phoneme_lengths  # List of actual phoneme sequence lengths
     }
 
 def create_emilia_ds(config: AudioConfig):
@@ -114,6 +122,8 @@ def create_emilia_ds(config: AudioConfig):
     dataset = dataset.batch(config.batch_size)
     # Apply audio processing with padding and masks
     dataset = dataset.map(process_audio_batch)
+    # Remove unwanted columns after processing
+    dataset = dataset.remove_columns(['json', 'mp3', '__key__', '__url__', 'language', 'text'])
     dataset = dataset.with_format("jax")
     return dataset
 

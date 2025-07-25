@@ -6,10 +6,10 @@ all shapes and computations work correctly.
 
 import jax
 import jax.numpy as jnp
-from typing import List, Dict, Tuple
+from typing import Dict
 
 # Import the loss functions
-from tokenizer.alpha.loss import (
+from tokenizer.previous_things.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
     create_phoneme_vocabulary,
