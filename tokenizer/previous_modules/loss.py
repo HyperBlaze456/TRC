@@ -393,8 +393,6 @@ def ctc_loss(
     Returns:
         CTC loss value
     """
-    # Import optax for CTC loss
-    import optax
 
     # Compute CTC loss using optax
     loss = optax.ctc_loss(

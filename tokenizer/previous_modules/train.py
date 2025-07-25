@@ -1,13 +1,21 @@
+import sys
+import os
+from dotenv import load_dotenv
+from huggingface_hub import login
+# Add the TRC directory to Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+
 import jax
 import jax.numpy as jnp
 from flax import nnx
 import optax
-from typing import Dict, Any, Tuple, Optional
-import time
+from functools import partial
+from dataclasses import dataclass
 
 # Import our modules
 from tokenizer.alpha.model import AudioTokenizer
-from tokenizer.alpha.loss import (
+from tokenizer.previous_modules.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
     create_phoneme_vocabulary,
@@ -19,6 +27,22 @@ from tokenizer.alpha.components.discriminators import (
     STFTDiscriminator
 )
 
+load_dotenv()
+hf_token = os.getenv("HF_TOKEN")
+
+# Set token globally for HuggingFace
+if hf_token:
+    print(f"Setting HF token (first 8 chars): {hf_token[:8]}...")
+    try:
+        login(token=hf_token)
+        os.environ["HF_TOKEN"] = hf_token
+        os.environ["HUGGING_FACE_HUB_TOKEN"] = hf_token
+        print("HF token set successfully")
+    except Exception as e:
+        print(f"Warning: Failed to login with HF token: {e}")
+else:
+    print("Warning: No HF_TOKEN found in environment")
+
 # Try to import phonemizer for multilingual G2P
 try:
     from phonemizer import phonemize
@@ -29,29 +53,30 @@ except ImportError:
     PHONEMIZER_AVAILABLE = False
     print("Warning: phonemizer not available. Using dummy phoneme targets.")
 
+possible_phonemes = [ # Emilia has 'zh', 'en-us', 'ja', 'fr', 'ge', 'ko']
+        "N", "a", "ai", "an", "au", "aı", "aŋ", "aɔ", "aː", "b", "bʲ", "d", "dz", "dʑ", "dʒ", "d͡ʑ",
+        "e", "ei", "eɪ", "eː", "f", "g", "gʲ", "h", "i", "ia", "iau", "in", "iç", "iŋ", "iən", "iəu",
+        "iɛ", "iʊŋ", "iː", "i̥", "j", "ja", "je", "jo", "ju", "jɛ", "jʌ", "k", "kʰ", "kʲ", "k͈", "l",
+        "m", "mʲ", "n", "nʲ", "o", "ou", "oʊ", "oː", "o̯e", "p", "pf", "pʰ", "pʲ", "p͈", "r", "s", "s͈",
+        "t", "ts", "tsʰ", "tɕ", "tɕʰ", "tʃ", "tʰ", "t͈", "t͡ɕ", "t͡ɕʰ", "t͡ɕ͈", "u", "ua", "uai", "uan",
+        "uaŋ", "uŋ", "uəi", "uən", "uː", "u̥", "v", "w", "wa", "we", "wi", "wɛ", "wʌ", "x", "y", "yn",
+        "yən", "yɛ", "yʊŋ", "yː", "z", "æ", "ç", "ð", "ø", "øː", "ı", "ŋ", "œ", "œ̃", "ɑ", "ɑɪ", "ɑʊ",
+        "ɑ̃", "ɔ", "ɔø", "ɔɪ", "ɔ̃", "ɕ", "ə", "ən", "əu", "ɚ", "ɛ", "ɛɹ", "ɛː", "ɛ̃", "ɝ", "ɤ", "ɥ",
+        "ɪ", "ɪɹ", "ɯ", "ɰi", "ɲ", "ɸ", "ɹ", "ɻ", "ɾ", "ɾʲ", "ʀ", "ʁ", "ʂ", "ʃ", "ʈʂ", "ʈʂʰ", "ʊ",
+        "ʊŋ", "ʊɹ", "ʌ", "ʒ", "θ"
+    ]
 
-class TrainingState(nnx.Module):
+@dataclass
+class TrainingState:
     """Training state containing models and optimizers."""
-
-    def __init__(
-            self,
-            generator: AudioTokenizer,
-            msd: MultiScaleDiscriminator,
-            mpd: MultiPeriodDiscriminator,
-            stftd: STFTDiscriminator,
-            gen_optimizer: nnx.Optimizer,
-            msd_optimizer: nnx.Optimizer,
-            mpd_optimizer: nnx.Optimizer,
-            stftd_optimizer: nnx.Optimizer,
-    ):
-        self.generator = generator
-        self.msd = msd  # Multi-Scale Discriminator
-        self.mpd = mpd  # Multi-Period Discriminator
-        self.stftd = stftd  # STFT Discriminator
-        self.gen_optimizer = gen_optimizer
-        self.msd_optimizer = msd_optimizer
-        self.mpd_optimizer = mpd_optimizer
-        self.stftd_optimizer = stftd_optimizer
+    generator: AudioTokenizer
+    msd: MultiScaleDiscriminator  # Multi-Scale Discriminator
+    mpd: MultiPeriodDiscriminator  # Multi-Period Discriminator
+    stftd: STFTDiscriminator  # STFT Discriminator
+    gen_optimizer: nnx.Optimizer
+    msd_optimizer: nnx.Optimizer
+    mpd_optimizer: nnx.Optimizer
+    stftd_optimizer: nnx.Optimizer
 
 
 def create_models_and_optimizers(
@@ -152,6 +177,7 @@ def create_models_and_optimizers(
     )
 
 
+@partial(nnx.jit, static_argnums=(4,))
 def train_generator_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -162,7 +188,7 @@ def train_generator_step(
     """Single generator training step using nnx transforms."""
 
     audio = batch['audio']
-    mask = batch['mask']  # Audio-level non-causal padding mask for losses
+    mask = batch['padding_mask']  # Audio-level non-causal padding mask for losses
     encoder_mask = batch.get('encoder_mask', mask)  # Encoder-level non-causal mask
     encoder_causal_mask = batch.get('encoder_causal_mask', encoder_mask)  # Encoder-level causal mask
 
@@ -251,6 +277,7 @@ def train_generator_step(
             disc_features_real=dummy_disc_features,
             disc_features_fake=dummy_disc_features,
             mask=mask,
+            encoder_mask=encoder_mask,
             config=base_loss_config
         )
 
@@ -259,7 +286,7 @@ def train_generator_step(
 
         # Multi-Scale Discriminator losses
         if loss_config.get('msd_adversarial_weight', 0) > 0:
-            from tokenizer.alpha.loss import adversarial_g_loss, feature_matching_loss
+            from tokenizer.previous_things.loss import adversarial_g_loss, feature_matching_loss
             msd_adv_loss = adversarial_g_loss(all_disc_outputs_fake['msd'])
             msd_fm_loss = feature_matching_loss(
                 all_disc_features_real['msd'],
@@ -273,7 +300,7 @@ def train_generator_step(
 
         # Multi-Period Discriminator losses
         if loss_config.get('mpd_adversarial_weight', 0) > 0:
-            from tokenizer.alpha.loss import adversarial_g_loss, feature_matching_loss
+            from tokenizer.previous_things.loss import adversarial_g_loss, feature_matching_loss
             mpd_adv_loss = adversarial_g_loss(all_disc_outputs_fake['mpd'])
             mpd_fm_loss = feature_matching_loss(
                 all_disc_features_real['mpd'],
@@ -287,7 +314,7 @@ def train_generator_step(
 
         # STFT Discriminator losses
         if loss_config.get('stftd_adversarial_weight', 0) > 0:
-            from tokenizer.alpha.loss import adversarial_g_loss, feature_matching_loss
+            from tokenizer.previous_things.loss import adversarial_g_loss, feature_matching_loss
             stftd_adv_loss = adversarial_g_loss(all_disc_outputs_fake['stftd'])
             stftd_fm_loss = feature_matching_loss(
                 all_disc_features_real['stftd'],
@@ -313,6 +340,7 @@ def train_generator_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_msd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -320,7 +348,7 @@ def train_msd_step(
     """Multi-Scale Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(msd):
@@ -352,6 +380,7 @@ def train_msd_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_mpd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -359,7 +388,7 @@ def train_mpd_step(
     """Multi-Period Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(mpd):
@@ -391,6 +420,7 @@ def train_mpd_step(
     return loss, loss_dict
 
 
+@nnx.jit
 def train_stftd_step(
         state: TrainingState,
         batch: Dict[str, jax.Array],
@@ -398,7 +428,7 @@ def train_stftd_step(
     """STFT Discriminator training step."""
 
     audio = batch['audio']
-    encoder_mask = batch.get('encoder_mask', batch['mask'])
+    encoder_mask = batch.get('encoder_mask', batch['padding_mask'])
 
     # Define loss function for value_and_grad
     def loss_fn(stftd):
@@ -430,60 +460,83 @@ def train_stftd_step(
     return loss, loss_dict
 
 
-def create_multilingual_g2p():
-    """Create a multilingual G2P function using phonemizer."""
+def create_multilingual_g2p(possible_phonemes=None):
+    """Create a multilingual G2P function using phonemizer with proper phoneme tokenization.
+
+    Args:
+        possible_phonemes: List of possible phoneme symbols for tokenization
+
+    Returns:
+        G2P function that converts text to phoneme sequences
+    """
     if not PHONEMIZER_AVAILABLE:
         return None
 
-    # Language mapping for Emilia dataset
-    language_map = {
-        'EN': 'en-us',
-        'ZH': 'zh',
-        'JA': 'ja',
-        'FR': 'fr-fr',
-        'DE': 'de',
-        'KO': 'ko',
-        'ES': 'es',
-        'IT': 'it',
-        'PT': 'pt',
-        'RU': 'ru',
-    }
+    # Sort phonemes by length (longest first) for proper tokenization
+    if possible_phonemes is None:
+        possible_phonemes = globals()['possible_phonemes']
 
-    def g2p_function(text, language='EN'):
-        """Convert text to phonemes using phonemizer.
+    # Create a sorted list for longest-match-first tokenization
+    sorted_phonemes = sorted(possible_phonemes, key=len, reverse=True)
+
+    def tokenize_phonemes(phoneme_string):
+        """Tokenize phoneme string into individual phonemes using longest-match-first."""
+        if not phoneme_string:
+            return []
+
+        tokens = []
+        i = 0
+
+        while i < len(phoneme_string):
+            # Skip whitespace
+            if phoneme_string[i] in ' \n\r\t':
+                i += 1
+                continue
+
+            # Try to match longest phoneme first
+            matched = False
+            for phoneme in sorted_phonemes:
+                if phoneme_string[i:i+len(phoneme)] == phoneme:
+                    tokens.append(phoneme)
+                    i += len(phoneme)
+                    matched = True
+                    break
+
+            if not matched:
+                # Unknown character, skip it
+                i += 1
+
+        return tokens if tokens else ['UNK']
+
+    def g2p_function(text, locale='en-us'):
+        """Convert text to phonemes using phonemizer with espeak backend.
 
         Args:
             text: Input text
-            language: Language code from dataset (e.g., 'EN', 'ZH', 'JA')
+            locale: Language locale (e.g., 'en-us', 'zh', 'ja', 'fr-fr', 'de', 'ko')
 
         Returns:
             List of phoneme symbols
         """
-        # Map dataset language code to phonemizer language
-        phonemizer_lang = language_map.get(language, 'en-us')
-
         try:
             # Use phonemizer for IPA conversion
-            phonemes = phonemize(
+            phoneme_string = phonemize(
                 text,
-                language=phonemizer_lang,
-                backend='espeak',  # espeak supports most languages
+                language=locale,
+                backend='espeak',
                 strip=True,
                 preserve_punctuation=False,
                 with_stress=False,
-                njobs=1,  # Single-threaded for stability
+                njobs=1,
             )
-            # Convert IPA string to list of phonemes
-            # This is a simplified tokenization - you may want to improve this
-            phoneme_list = []
-            for char in phonemes:
-                if char not in [' ', '\n', '\r', '\t']:
-                    phoneme_list.append(char)
-            return phoneme_list if phoneme_list else ['<unk>']
+
+            # Tokenize into individual phonemes
+            return tokenize_phonemes(phoneme_string)
+
         except Exception as e:
-            print(f"G2P error for language {language}: {e}")
-            # Fallback to character-based tokenization
-            return list(text) if text else ['<unk>']
+            print(f"G2P error for locale {locale}: {e}")
+            # Return UNK token on error
+            return ['UNK']
 
     return g2p_function
 
@@ -508,9 +561,19 @@ def prepare_phoneme_targets_from_metadata(
     """
     batch_size = batch['audio'].shape[0]
 
-    # Extract text and language metadata
-    texts = batch.get('meta_text', [None] * batch_size)
-    languages = batch.get('meta_language', ['EN'] * batch_size)
+    # Extract text and locale metadata
+    texts = batch.get('text', [None] * batch_size)
+    locales = batch.get('language', ['en-us'] * batch_size)
+
+    # Map language codes to locales if needed
+    locale_map = {
+        'en': 'en-us',
+        'zh': 'zh',
+        'ja': 'ja',
+        'fr': 'fr',
+        'de': 'de',
+        'ko': 'ko',
+    }
 
     # Convert texts to phonemes
     all_phoneme_indices = []
@@ -518,32 +581,36 @@ def prepare_phoneme_targets_from_metadata(
 
     for i in range(batch_size):
         text = texts[i]
-        language = languages[i] if languages[i] else 'EN'
+        locale = locales[i] if locales[i] else 'en-us'
+
+        # Convert language code to locale if needed
+        if locale in locale_map:
+            locale = locale_map[locale]
 
         if text and g2p_function:
-            # Convert text to phonemes
-            phonemes = g2p_function(text, language)
+            # Convert text to phonemes using the locale
+            phonemes = g2p_function(text, locale)
 
             # Convert phonemes to indices
             phoneme_indices = []
-            for phoneme in phonemes[:max_phoneme_length - 2]:  # Leave room for special tokens
-                idx = phoneme_vocab.get(phoneme, phoneme_vocab.get('<unk>', 0))
+            for phoneme in phonemes[:max_phoneme_length]:
+                idx = phoneme_vocab.get(phoneme, phoneme_vocab.get('UNK', 1))
                 phoneme_indices.append(idx)
-
-            # Add EOS token
-            if '<eos>' in phoneme_vocab:
-                phoneme_indices.append(phoneme_vocab['<eos>'])
 
             all_phoneme_indices.append(phoneme_indices)
             all_lengths.append(len(phoneme_indices))
         else:
-            # Fallback: use a dummy sequence
+            # Fallback: use a dummy sequence with UNK tokens
             dummy_length = min(10, max_phoneme_length)
-            all_phoneme_indices.append([phoneme_vocab.get('<unk>', 0)] * dummy_length)
+            all_phoneme_indices.append([phoneme_vocab.get('UNK', 1)] * dummy_length)
             all_lengths.append(dummy_length)
 
     # Pad sequences to max length (right padding for CTC)
-    max_length = min(max(all_lengths), max_phoneme_length)
+    if all_lengths:
+        max_length = min(max(all_lengths), max_phoneme_length)
+    else:
+        max_length = max_phoneme_length
+
     padded_targets = []
 
     for indices in all_phoneme_indices:
@@ -661,7 +728,7 @@ def main():
         'hidden_size': 512,
         'encoder_depth': 4,
         'encoder_heads': 8,
-        'phoneme_codebook_size': 100,
+        'phoneme_codebook_size': 155,  # 152 phonemes + 3 special tokens (blank, unk, pad)
         'bsq_spherical_dim': 256,
         'decoder_output_48khz': False,
 
@@ -688,28 +755,30 @@ def main():
     print("Creating models...")
     state = create_models_and_optimizers(config, rngs)
 
-    # Create optimized data loader with parallel processing
-    print("Creating optimized Emilia data loader with parallel MP3 decoding...")
-    from tokenizer.utils.data.optimized_loader import create_optimized_emilia_loader
-    data_loader = create_optimized_emilia_loader(
-        language="EN",  # Start with English, can be changed to other languages
+    # Create HuggingFace data loader
+    print("Creating HuggingFace Emilia data loader...")
+    from tokenizer.utils.data.simple_loader import create_emilia_ds, AudioConfig
+
+    audio_config = AudioConfig(
+        dataset_name="amphion/Emilia-Dataset",
+        dataset_config="default",
         split="train",
         sample_rate=config['sample_rate'],
         batch_size=config['batch_size'],
-        max_duration_seconds=config['max_duration_seconds'],
-        num_workers=config.get('decode_workers', 4),  # Parallel MP3 decoders
-        prefetch_batches=config.get('prefetch_batches', 2),  # Prefetch batches
-        profile=True,  # Enable profiling to debug bottlenecks
-        profile_interval=10  # Print stats every 10 batches
+        unified=config['max_duration_seconds'],
+        streaming=True,
     )
 
+    data_loader = create_emilia_ds(audio_config)
+
     # Setup multilingual G2P if available
-    g2p_fn = create_multilingual_g2p()
+    g2p_fn = create_multilingual_g2p(possible_phonemes)
     if g2p_fn:
         print("Multilingual G2P ready (phonemizer)")
-        # Create phoneme vocabulary for multiple languages
-        # This would be extended with phonemes from all target languages
-        phoneme_vocab = create_phoneme_vocabulary()
+        # Create phoneme vocabulary using the comprehensive phoneme list
+        phoneme_vocab = create_phoneme_vocabulary(possible_phonemes)
+        print(f"Phoneme vocabulary size: {len(phoneme_vocab)} "
+              f"({len(possible_phonemes)} phonemes + 3 special tokens)")
     else:
         print("G2P not available, using dummy phoneme targets")
         phoneme_vocab = None
