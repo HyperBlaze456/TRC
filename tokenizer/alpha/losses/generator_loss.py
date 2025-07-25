@@ -3,12 +3,13 @@ Generator losses for audio tokenizer training (DAC-style recipe).
 
 This module implements all losses needed for training the generator/encoder-decoder
 in a GAN-based audio codec, following the DAC (Descript Audio Codec) approach.
+All functions are JIT-compatible with no conditional logic.
 """
 
 import jax
 import jax.numpy as jnp
-import optax
 from functools import partial
+from tokenizer.utils.mel import MelSpectrogramJAX
 
 
 # ============================================================================
@@ -18,130 +19,102 @@ from functools import partial
 def l1_loss(
     predictions: jax.Array,
     targets: jax.Array,
-    mask: jax.Array = None
+    mask: jax.Array
 ) -> jax.Array:
-    """L1 loss with optional masking.
+    """L1 loss with masking.
     
     Args:
         predictions: Predicted audio [B, T, C]
         targets: Target audio [B, T, C]
-        mask: Optional padding mask [B, T] where True = valid
+        mask: Padding mask [B, T] where True = valid
         
     Returns:
         Scalar L1 loss
     """
-    loss = jnp.abs(predictions - targets)
+    # Expand mask to match audio shape
+    mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
     
-    if mask is not None:
-        # Expand mask to match audio shape
-        if mask.ndim == 2 and loss.ndim == 3:
-            mask = mask[:, :, None]  # [B, T, 1]
-        
-        # Apply mask and compute mean over valid positions
-        loss = loss * mask
-        return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
-    else:
-        return jnp.mean(loss)
+    loss = jnp.abs(predictions - targets)
+    loss = loss * mask
+    return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
 
 
 def l2_loss(
     predictions: jax.Array,
     targets: jax.Array,
-    mask: jax.Array = None
+    mask: jax.Array
 ) -> jax.Array:
-    """L2 (MSE) loss with optional masking.
+    """L2 (MSE) loss with masking.
     
     Args:
         predictions: Predicted audio [B, T, C]
         targets: Target audio [B, T, C]
-        mask: Optional padding mask [B, T] where True = valid
+        mask: Padding mask [B, T] where True = valid
         
     Returns:
         Scalar L2 loss
     """
-    loss = jnp.square(predictions - targets)
+    # Expand mask to match audio shape
+    mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
     
-    if mask is not None:
-        # Expand mask to match audio shape
-        if mask.ndim == 2 and loss.ndim == 3:
-            mask = mask[:, :, None]  # [B, T, 1]
-        
-        # Apply mask and compute mean over valid positions
-        loss = loss * mask
-        return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
-    else:
-        return jnp.mean(loss)
+    loss = jnp.square(predictions - targets)
+    loss = loss * mask
+    return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
 
 
 # ============================================================================
 # Mel-Spectrogram Loss
 # ============================================================================
 
+# Pre-initialize mel spectrogram for 24kHz
+mel_transform_24k = MelSpectrogramJAX(
+    sample_rate=24000,
+    n_fft=1024,
+    hop_length=256,
+    n_mels=128,
+    fmin=0.0,
+    fmax=12000.0
+)
+
+
 def mel_spectrogram_loss(
     predictions: jax.Array,
     targets: jax.Array,
-    sample_rate: int = 24000,
-    n_fft: int = 1024,
-    hop_length: int = 256,
-    n_mels: int = 128,
-    fmin: float = 0.0,
-    fmax: float = None,
-    mask: jax.Array = None
+    mask: jax.Array
 ) -> jax.Array:
     """Mel-spectrogram L1 loss for perceptual quality.
     
     Args:
-        predictions: Predicted audio [B, T, C]
-        targets: Target audio [B, T, C]
-        sample_rate: Audio sample rate
-        n_fft: FFT size
-        hop_length: Hop length for STFT
-        n_mels: Number of mel bins
-        fmin: Minimum frequency
-        fmax: Maximum frequency (defaults to sample_rate/2)
-        mask: Optional padding mask [B, T]
+        predictions: Predicted audio [B, T]
+        targets: Target audio [B, T]
+        mask: Padding mask [B, T] where True = valid
         
     Returns:
         Scalar mel-spectrogram loss
     """
-    if fmax is None:
-        fmax = sample_rate / 2.0
+    # Compute mel spectrograms
+    pred_mel = jax.vmap(mel_transform_24k)(predictions)  # [B, n_mels, n_frames]
+    target_mel = jax.vmap(mel_transform_24k)(targets)  # [B, n_mels, n_frames]
     
-    # For now, return a placeholder
-    # In practice, you'd use a proper mel-spectrogram implementation
-    # This is a simplified version using FFT
-    
-    # Remove channel dimension for processing
-    if predictions.ndim == 3:
-        predictions = predictions[:, :, 0]  # [B, T]
-        targets = targets[:, :, 0]  # [B, T]
-    
-    # Simple magnitude spectrum as placeholder for mel-spectrogram
-    # In real implementation, use proper mel filterbank
-    pred_fft = jnp.fft.rfft(predictions, n=n_fft, axis=-1)
-    target_fft = jnp.fft.rfft(targets, n=n_fft, axis=-1)
-    
-    pred_mag = jnp.abs(pred_fft)
-    target_mag = jnp.abs(target_fft)
-    
-    # Log magnitude
+    # Convert to log scale
     eps = 1e-5
-    pred_log_mag = jnp.log(pred_mag + eps)
-    target_log_mag = jnp.log(target_mag + eps)
+    pred_log_mel = jnp.log(pred_mel + eps)
+    target_log_mel = jnp.log(target_mel + eps)
     
-    loss = jnp.abs(pred_log_mag - target_log_mag)
+    # L1 loss
+    loss = jnp.abs(pred_log_mel - target_log_mel)
     
-    if mask is not None:
-        # Create frequency mask based on time mask
-        # This is simplified - proper implementation would handle STFT framing
-        freq_mask = mask[:, :pred_log_mag.shape[1]]
-        if freq_mask.ndim == 2 and loss.ndim == 3:
-            freq_mask = freq_mask[:, :, None]
-        
-        loss = loss * freq_mask
-        return jnp.sum(loss) / jnp.maximum(jnp.sum(freq_mask), 1.0)
-    else:
-        return jnp.mean(loss)
+    # Create mel-domain mask from time-domain mask
+    # Downsample mask to match mel frames
+    hop_length = 256
+    n_frames = loss.shape[-1]
+    indices = jnp.arange(n_frames) * hop_length
+    indices = jnp.minimum(indices, mask.shape[1] - 1)
+    mask_mel = mask[:, indices]  # [B, n_frames]
+    mask_mel = jnp.expand_dims(mask_mel, axis=1)  # [B, 1, n_frames]
+    
+    loss = loss * mask_mel
+    return jnp.sum(loss) / jnp.maximum(jnp.sum(mask_mel), 1.0)
 
 
 # ============================================================================
@@ -151,106 +124,86 @@ def mel_spectrogram_loss(
 def stft_loss(
     predictions: jax.Array,
     targets: jax.Array,
+    mask: jax.Array,
     n_fft: int,
-    hop_length: int = None,
-    mask: jax.Array = None
+    hop_length: int
 ) -> tuple[jax.Array, jax.Array]:
     """Single-resolution STFT loss (spectral convergence + log magnitude).
     
     Args:
-        predictions: Predicted audio [B, T, C]
-        targets: Target audio [B, T, C]
+        predictions: Predicted audio [B, T]
+        targets: Target audio [B, T]
+        mask: Padding mask [B, T] where True = valid
         n_fft: FFT size
-        hop_length: Hop length (defaults to n_fft // 4)
-        mask: Optional padding mask [B, T]
+        hop_length: Hop length
         
     Returns:
         spectral_convergence: Relative spectral error
         log_magnitude: Absolute log magnitude error
     """
-    if hop_length is None:
-        hop_length = n_fft // 4
-    
-    # Remove channel dimension
-    if predictions.ndim == 3:
-        predictions = predictions[:, :, 0]
-        targets = targets[:, :, 0]
-    
-    # Compute STFT (simplified - real implementation needs proper windowing)
-    pred_stft = jnp.fft.rfft(predictions, n=n_fft, axis=-1)
-    target_stft = jnp.fft.rfft(targets, n=n_fft, axis=-1)
+    # Compute STFT
+    pred_stft = jax.vmap(lambda x: jnp.fft.rfft(x, n=n_fft))(predictions)
+    target_stft = jax.vmap(lambda x: jnp.fft.rfft(x, n=n_fft))(targets)
     
     pred_mag = jnp.abs(pred_stft)
     target_mag = jnp.abs(target_stft)
     
     # Spectral convergence loss
-    sc_loss = jnp.sqrt(jnp.sum(jnp.square(pred_mag - target_mag), axis=-1)) / (
-        jnp.sqrt(jnp.sum(jnp.square(target_mag), axis=-1)) + 1e-6
-    )
+    diff = pred_mag - target_mag
+    sc_num = jnp.sqrt(jnp.sum(jnp.square(diff), axis=-1))
+    sc_den = jnp.sqrt(jnp.sum(jnp.square(target_mag), axis=-1)) + 1e-6
+    sc_loss = sc_num / sc_den
     
     # Log magnitude loss
     eps = 1e-5
     lm_loss = jnp.abs(jnp.log(pred_mag + eps) - jnp.log(target_mag + eps))
     
-    if mask is not None:
-        # Apply mask
-        batch_size = predictions.shape[0]
-        freq_frames = pred_mag.shape[1]
-        
-        # Simple mask interpolation for frequency domain
-        if mask.shape[1] != freq_frames:
-            # Downsample mask to match STFT frames
-            indices = jnp.linspace(0, mask.shape[1] - 1, freq_frames).astype(jnp.int32)
-            mask_freq = mask[:, indices]
-        else:
-            mask_freq = mask[:, :freq_frames]
-        
-        sc_loss = sc_loss * mask_freq
-        sc_loss = jnp.sum(sc_loss) / jnp.maximum(jnp.sum(mask_freq), 1.0)
-        
-        lm_loss = lm_loss * mask_freq[:, :, None]
-        lm_loss = jnp.sum(lm_loss) / jnp.maximum(jnp.sum(mask_freq[:, :, None]), 1.0)
-    else:
-        sc_loss = jnp.mean(sc_loss)
-        lm_loss = jnp.mean(lm_loss)
+    # Apply mask - for simplified FFT, we need to handle single-frame output
+    # STFT on full signal produces shape [B, n_fft//2 + 1]
+    # We'll use the first element of mask as a simple scalar mask
+    mask_scalar = mask[:, 0]  # [B]
+    
+    sc_loss = sc_loss * mask_scalar
+    sc_loss = jnp.sum(sc_loss) / jnp.maximum(jnp.sum(mask_scalar), 1.0)
+    
+    # For log magnitude, we need to handle [B, n_freqs] shape
+    mask_freq = jnp.expand_dims(mask_scalar, axis=-1)  # [B, 1]
+    lm_loss = lm_loss * mask_freq
+    lm_loss = jnp.sum(lm_loss) / jnp.maximum(jnp.sum(mask_freq), 1.0)
     
     return sc_loss, lm_loss
+
+
+# Static partial functions for different FFT sizes
+stft_loss_512 = partial(stft_loss, n_fft=512, hop_length=128)
+stft_loss_1024 = partial(stft_loss, n_fft=1024, hop_length=256)
+stft_loss_2048 = partial(stft_loss, n_fft=2048, hop_length=512)
 
 
 def multi_resolution_stft_loss(
     predictions: jax.Array,
     targets: jax.Array,
-    n_ffts: list[int] = [512, 1024, 2048],
-    hop_lengths: list[int] = None,
-    mask: jax.Array = None
+    mask: jax.Array
 ) -> tuple[jax.Array, jax.Array]:
-    """Multi-resolution STFT loss.
+    """Multi-resolution STFT loss with fixed resolutions.
     
     Args:
-        predictions: Predicted audio [B, T, C]
-        targets: Target audio [B, T, C]
-        n_ffts: List of FFT sizes
-        hop_lengths: List of hop lengths (defaults to n_fft // 4)
-        mask: Optional padding mask [B, T]
+        predictions: Predicted audio [B, T]
+        targets: Target audio [B, T]
+        mask: Padding mask [B, T] where True = valid
         
     Returns:
         total_sc: Total spectral convergence loss
         total_lm: Total log magnitude loss
     """
-    if hop_lengths is None:
-        hop_lengths = [n_fft // 4 for n_fft in n_ffts]
-    
-    total_sc = 0.0
-    total_lm = 0.0
-    
-    for n_fft, hop_length in zip(n_ffts, hop_lengths):
-        sc, lm = stft_loss(predictions, targets, n_fft, hop_length, mask)
-        total_sc += sc
-        total_lm += lm
+    # Compute losses at each resolution
+    sc1, lm1 = stft_loss_512(predictions, targets, mask)
+    sc2, lm2 = stft_loss_1024(predictions, targets, mask)
+    sc3, lm3 = stft_loss_2048(predictions, targets, mask)
     
     # Average over resolutions
-    total_sc = total_sc / len(n_ffts)
-    total_lm = total_lm / len(n_ffts)
+    total_sc = (sc1 + sc2 + sc3) / 3.0
+    total_lm = (lm1 + lm2 + lm3) / 3.0
     
     return total_sc, total_lm
 
@@ -262,7 +215,7 @@ def multi_resolution_stft_loss(
 def vq_commitment_loss(
     encoder_output: jax.Array,
     quantized: jax.Array,
-    mask: jax.Array = None,
+    mask: jax.Array,
     beta: float = 0.1
 ) -> jax.Array:
     """VQ commitment loss for phoneme quantizer.
@@ -270,30 +223,24 @@ def vq_commitment_loss(
     Args:
         encoder_output: Output before quantization [B, T, D]
         quantized: Quantized output [B, T, D]
-        mask: Optional encoder mask [B, T]
-        beta: Commitment weight (low for flexibility)
+        mask: Encoder mask [B, T] where True = valid
+        beta: Commitment weight
         
     Returns:
         Scalar commitment loss
     """
-    # Stop gradient on quantized for commitment
+    # Expand mask to match encoder shape
+    mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
+    
     loss = jnp.square(encoder_output - jax.lax.stop_gradient(quantized))
-    
-    if mask is not None:
-        if mask.ndim == 2 and loss.ndim == 3:
-            mask = mask[:, :, None]  # [B, T, 1]
-        loss = loss * mask
-        loss = jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
-    else:
-        loss = jnp.mean(loss)
-    
-    return beta * loss
+    loss = loss * mask
+    return beta * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
 
 
 def bsq_commitment_loss(
     residual: jax.Array,
     quantized: jax.Array,
-    mask: jax.Array = None,
+    mask: jax.Array,
     gamma: float = 1.0
 ) -> jax.Array:
     """BSQ commitment loss for residual quantizer.
@@ -301,56 +248,53 @@ def bsq_commitment_loss(
     Args:
         residual: Residual before quantization [B, T, D]
         quantized: Quantized residual [B, T, D]
-        mask: Optional encoder mask [B, T]
+        mask: Encoder mask [B, T] where True = valid
         gamma: Commitment weight
         
     Returns:
         Scalar commitment loss
     """
+    # Expand mask to match encoder shape
+    mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
+    
     loss = jnp.square(residual - jax.lax.stop_gradient(quantized))
-    
-    if mask is not None:
-        if mask.ndim == 2 and loss.ndim == 3:
-            mask = mask[:, :, None]  # [B, T, 1]
-        loss = loss * mask
-        loss = jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
-    else:
-        loss = jnp.mean(loss)
-    
-    return gamma * loss
+    loss = loss * mask
+    return gamma * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
 
 
 # ============================================================================
 # Adversarial Losses
 # ============================================================================
 
-def adversarial_g_loss(
-    disc_outputs: list[jax.Array],
-    loss_type: str = "lsgan"
-) -> jax.Array:
-    """Generator adversarial loss.
+def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
+    """LSGAN generator adversarial loss.
     
     Args:
         disc_outputs: List of discriminator outputs for generated samples
-        loss_type: "lsgan" or "hinge"
         
     Returns:
         Scalar adversarial loss
     """
     total_loss = 0.0
-    
     for output in disc_outputs:
-        if loss_type == "lsgan":
-            # Generator wants discriminator to output 1
-            loss = jnp.mean(jnp.square(output - 1))
-        elif loss_type == "hinge":
-            # Generator wants positive discriminator outputs
-            loss = -jnp.mean(output)
-        else:
-            raise ValueError(f"Unknown loss type: {loss_type}")
-        
-        total_loss += loss
+        loss = jnp.mean(jnp.square(output - 1))
+        total_loss = total_loss + loss
+    return total_loss / len(disc_outputs)
+
+
+def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
+    """Hinge generator adversarial loss.
     
+    Args:
+        disc_outputs: List of discriminator outputs for generated samples
+        
+    Returns:
+        Scalar adversarial loss
+    """
+    total_loss = 0.0
+    for output in disc_outputs:
+        loss = -jnp.mean(output)
+        total_loss = total_loss + loss
     return total_loss / len(disc_outputs)
 
 
@@ -372,20 +316,18 @@ def feature_matching_loss(
     
     for real_feats, fake_feats in zip(real_features, fake_features):
         for real_f, fake_f in zip(real_feats, fake_feats):
-            # L1 loss between features
             loss = jnp.mean(jnp.abs(fake_f - jax.lax.stop_gradient(real_f)))
-            total_loss += loss
-            num_features += 1
+            total_loss = total_loss + loss
+            num_features = num_features + 1
     
-    # Average over all features
-    return total_loss / max(num_features, 1)
+    return total_loss / jnp.maximum(num_features, 1)
 
 
 # ============================================================================
 # Combined Generator Loss
 # ============================================================================
 
-def compute_generator_loss(
+def compute_generator_loss_base(
     pred_audio: jax.Array,
     target_audio: jax.Array,
     encoder_output: jax.Array,
@@ -397,11 +339,18 @@ def compute_generator_loss(
     disc_features_fake: list[list[jax.Array]],
     padding_mask: jax.Array,
     encoder_mask: jax.Array,
-    # Loss configuration
-    loss_weights: dict = None,
-    adversarial_loss_type: str = "lsgan",
-    n_ffts: list[int] = [512, 1024, 2048]
-) -> tuple[jax.Array, dict]:
+    adversarial_loss_fn,
+    # Static weights
+    w_l1: float = 1.0,
+    w_l2: float = 1.0,
+    w_mel: float = 15.0,
+    w_stft_sc: float = 2.0,
+    w_stft_lm: float = 1.0,
+    w_vq_commit: float = 0.1,
+    w_bsq_commit: float = 1.0,
+    w_adversarial: float = 1.0,
+    w_feature_match: float = 10.0
+) -> tuple[jax.Array, dict[str, jax.Array]]:
     """Compute all generator losses with DAC-style weighting.
     
     Args:
@@ -416,80 +365,76 @@ def compute_generator_loss(
         disc_features_fake: Discriminator features for fake audio
         padding_mask: Audio-level mask [B, T] where True = valid
         encoder_mask: Encoder-level mask [B, T'] where True = valid
-        loss_weights: Dictionary of loss weights
-        adversarial_loss_type: "lsgan" or "hinge"
-        n_ffts: FFT sizes for multi-resolution STFT
+        adversarial_loss_fn: Function for adversarial loss
+        w_*: Loss weights
         
     Returns:
         total_loss: Combined scalar loss
         metrics: Dictionary of individual losses
     """
-    if loss_weights is None:
-        loss_weights = {
-            # Reconstruction
-            'l1': 1.0,
-            'l2': 1.0,
-            'mel': 15.0,  # High weight for perceptual quality
-            'stft_sc': 2.0,  # Spectral convergence
-            'stft_lm': 1.0,  # Log magnitude
-            
-            # Quantization
-            'vq_commit': 0.1,  # Low for flexibility
-            'bsq_commit': 1.0,
-            
-            # Adversarial
-            'adversarial': 1.0,
-            'feature_match': 10.0,
-        }
-    
-    metrics = {}
-    
     # Reconstruction losses
-    metrics['l1'] = l1_loss(pred_audio, target_audio, padding_mask)
-    metrics['l2'] = l2_loss(pred_audio, target_audio, padding_mask)
-    metrics['mel'] = mel_spectrogram_loss(pred_audio, target_audio, mask=padding_mask)
+    l1 = l1_loss(pred_audio, target_audio, padding_mask)
+    l2 = l2_loss(pred_audio, target_audio, padding_mask)
+    
+    # Remove channel dimension for spectral losses
+    pred_audio_2d = pred_audio[:, :, 0]
+    target_audio_2d = target_audio[:, :, 0]
+    
+    mel = mel_spectrogram_loss(pred_audio_2d, target_audio_2d, padding_mask)
     
     # Multi-resolution STFT losses
-    sc_loss, lm_loss = multi_resolution_stft_loss(
-        pred_audio, target_audio, n_ffts=n_ffts, mask=padding_mask
+    stft_sc, stft_lm = multi_resolution_stft_loss(
+        pred_audio_2d, target_audio_2d, padding_mask
     )
-    metrics['stft_sc'] = sc_loss
-    metrics['stft_lm'] = lm_loss
     
     # Quantization losses
-    metrics['vq_commit'] = vq_commitment_loss(
+    vq_commit = vq_commitment_loss(
         encoder_output, vq_quantized, encoder_mask, beta=1.0
     )
-    metrics['bsq_commit'] = bsq_commitment_loss(
+    bsq_commit = bsq_commitment_loss(
         vq_residual, bsq_quantized, encoder_mask, gamma=1.0
     )
     
     # Adversarial losses
-    metrics['adversarial'] = adversarial_g_loss(disc_outputs, adversarial_loss_type)
-    metrics['feature_match'] = feature_matching_loss(disc_features_real, disc_features_fake)
+    adversarial = adversarial_loss_fn(disc_outputs)
+    feature_match = feature_matching_loss(disc_features_real, disc_features_fake)
     
     # Combine all losses
-    total_loss = sum(
-        loss_weights.get(name, 0.0) * value 
-        for name, value in metrics.items()
+    total_loss = (
+        w_l1 * l1 +
+        w_l2 * l2 +
+        w_mel * mel +
+        w_stft_sc * stft_sc +
+        w_stft_lm * stft_lm +
+        w_vq_commit * vq_commit +
+        w_bsq_commit * bsq_commit +
+        w_adversarial * adversarial +
+        w_feature_match * feature_match
     )
     
-    metrics['total'] = total_loss
+    metrics = {
+        'l1': l1,
+        'l2': l2,
+        'mel': mel,
+        'stft_sc': stft_sc,
+        'stft_lm': stft_lm,
+        'vq_commit': vq_commit,
+        'bsq_commit': bsq_commit,
+        'adversarial': adversarial,
+        'feature_match': feature_match,
+        'total': total_loss
+    }
     
     return total_loss, metrics
 
 
-# ============================================================================
-# JIT-compiled versions
-# ============================================================================
-
-# Create versions with static loss configuration
+# Create versions with static adversarial loss functions
 compute_generator_loss_lsgan = partial(
-    compute_generator_loss, 
-    adversarial_loss_type="lsgan"
+    compute_generator_loss_base,
+    adversarial_loss_fn=adversarial_g_loss_lsgan
 )
 
 compute_generator_loss_hinge = partial(
-    compute_generator_loss, 
-    adversarial_loss_type="hinge"
+    compute_generator_loss_base,
+    adversarial_loss_fn=adversarial_g_loss_hinge
 )
