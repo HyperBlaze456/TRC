@@ -1,8 +1,6 @@
 import jax
 import jax.numpy as jnp
 from flax import nnx
-from typing import List, Tuple
-
 
 class PeriodDiscriminator(nnx.Module):
     """Single period discriminator sub-network."""
@@ -20,7 +18,7 @@ class PeriodDiscriminator(nnx.Module):
         
         self.conv_post = nnx.Conv(1024, 1, kernel_size=(3, 1), strides=(1, 1), padding=((1, 1), (0, 0)), rngs=rngs) # This can be linear.
         
-    def __call__(self, x: jax.Array) -> Tuple[jax.Array, List[jax.Array]]:
+    def __call__(self, x: jax.Array) -> tuple[jax.Array, list[jax.Array]]:
         """
         Args:
             x: Input tensor of shape [B, T]
@@ -63,7 +61,7 @@ class PeriodDiscriminator(nnx.Module):
 class MultiPeriodDiscriminator(nnx.Module):
     """Multi-Period Discriminator (MPD) from HiFi-GAN."""
     
-    def __init__(self, periods: List[int] = [2, 3, 5, 7, 11], kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
+    def __init__(self, periods: list[int] = [2, 3, 5, 7, 11], kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
         """
         Args:
             periods: List of periods for sub-discriminators
@@ -76,7 +74,7 @@ class MultiPeriodDiscriminator(nnx.Module):
             for period in periods
         ]
     
-    def __call__(self, x: jax.Array) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
+    def __call__(self, x: jax.Array) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         """
         Args:
             x: Input waveform of shape [B, T] or [B, T, 1]

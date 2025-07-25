@@ -4,8 +4,6 @@ import jax
 from tokenizer.alpha.components.encoder import RawEncoder
 from tokenizer.alpha.components.quantizer import PhonemeBSQQuantizer
 from tokenizer.alpha.components.decoder import RawDecoder
-# downsample_mask is no longer needed - masks are pre-computed
-
 
 class AudioTokenizer(nnx.Module):
     """Main audio tokenizer model with phoneme VQ + acoustic BSQ.

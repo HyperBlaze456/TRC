@@ -1,7 +1,5 @@
 import jax
 from flax import nnx
-from typing import List, Tuple
-
 
 class ScaleDiscriminator(nnx.Module):
     """Single scale discriminator that operates on audio at a specific downsampling rate.
@@ -12,9 +10,9 @@ class ScaleDiscriminator(nnx.Module):
     def __init__(
         self, 
         rate: int = 1,
-        channels: List[int] = [16, 64, 256, 1024, 1024, 1024],
+        channels: list[int] = [16, 64, 256, 1024, 1024, 1024],
         kernel_size: int = 15,
-        groups: List[int] = [1, 4, 16, 64, 256, 1],
+        groups: list[int] = [1, 4, 16, 64, 256, 1],
         strides: int = 1,
         rngs: nnx.Rngs = None
     ):
@@ -32,7 +30,7 @@ class ScaleDiscriminator(nnx.Module):
             # Use final kernel size and stride for last layer
             is_last = i == len(channels) - 1
             k = 3 if is_last else kernel_size
-            s = 1  # make this later on somewhat configurable via strides, which can be a list later on?
+            s = 1  # make this later on somewhat configurable via parameter `strides`, which can be a list later on?
             
             conv = nnx.Conv(
                 in_features=in_channels,
@@ -56,7 +54,7 @@ class ScaleDiscriminator(nnx.Module):
             
             in_channels = out_channels
     
-    def __call__(self, x: jax.Array, training: bool = True) -> Tuple[jax.Array, List[jax.Array]]:
+    def __call__(self, x: jax.Array, training: bool = True) -> tuple[jax.Array, list[jax.Array]]:
         """Forward pass returning output and intermediate features.
         
         Args:
@@ -98,10 +96,10 @@ class MultiScaleDiscriminator(nnx.Module):
     
     def __init__(
         self,
-        rates: List[int] = [1, 2, 4],
-        channels: List[int] = [16, 64, 256, 1024, 1024, 1024],
+        rates: list[int] = [1, 2, 4],
+        channels: list[int] = [16, 64, 256, 1024, 1024, 1024],
         kernel_size: int = 15,
-        groups: List[int] = [1, 4, 16, 64, 256, 1],
+        groups: list[int] = [1, 4, 16, 64, 256, 1],
         rngs: nnx.Rngs = None
     ):
         if rngs is None:
@@ -118,7 +116,7 @@ class MultiScaleDiscriminator(nnx.Module):
             )
             self.discriminators.append(disc)
     
-    def __call__(self, x: jax.Array, training: bool = True) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
+    def __call__(self, x: jax.Array, training: bool = True) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         """Forward pass through all scale discriminators.
         
         Args:
