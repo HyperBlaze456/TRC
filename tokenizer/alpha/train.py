@@ -338,7 +338,7 @@ def train_discriminator_step(
     return metrics, (generator, msd, mpd, stftd)
 
 
-@partial(nnx.jit, static_argnums=(12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26))
+@partial(nnx.jit, static_argnums=(11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25))
 def train_generator_step(
     # Individual modules
     generator: SpeechTokenizer,
@@ -365,7 +365,6 @@ def train_generator_step(
     w_adversarial: float,
     w_feature_match: float,
     w_ctc: float,
-    # Extra static params for generator loss
     stft_fft_sizes: tuple = (2048, 1024, 512, 256, 128),
     stft_hop_sizes: tuple = (512, 256, 128, 64, 32),
     stft_win_sizes: tuple = (2048, 1024, 512, 256, 128)
