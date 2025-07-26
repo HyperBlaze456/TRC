@@ -14,7 +14,7 @@ from functools import partial
 from dataclasses import dataclass
 
 # Import our modules
-from tokenizer.alpha.model import AudioTokenizer
+from tokenizer.alpha.model import SpeechTokenizer
 from tokenizer.previous_modules.loss import (
     compute_generator_loss,
     compute_discriminator_loss,
@@ -69,7 +69,7 @@ possible_phonemes = [ # Emilia has 'zh', 'en-us', 'ja', 'fr', 'ge', 'ko']
 @dataclass
 class TrainingState:
     """Training state containing models and optimizers."""
-    generator: AudioTokenizer
+    generator: SpeechTokenizer
     msd: MultiScaleDiscriminator  # Multi-Scale Discriminator
     mpd: MultiPeriodDiscriminator  # Multi-Period Discriminator
     stftd: STFTDiscriminator  # STFT Discriminator
@@ -86,7 +86,7 @@ def create_models_and_optimizers(
     """Create models and optimizers."""
 
     # Create generator (AudioTokenizer)
-    generator = AudioTokenizer(
+    generator = SpeechTokenizer(
         hidden_size=config['hidden_size'],
         encoder_depth=config['encoder_depth'],
         encoder_heads=config['encoder_heads'],

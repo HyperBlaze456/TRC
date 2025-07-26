@@ -5,7 +5,7 @@ from tokenizer.alpha.components.encoder import RawEncoder
 from tokenizer.alpha.components.quantizer import PhonemeBSQQuantizer
 from tokenizer.alpha.components.decoder import RawDecoder
 
-class AudioTokenizer(nnx.Module):
+class SpeechTokenizer(nnx.Module):
     """Main audio tokenizer model with phoneme VQ + acoustic BSQ.
 
     Processes raw audio waveforms through:

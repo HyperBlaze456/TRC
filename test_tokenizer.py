@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 from flax import nnx
 
-from tokenizer.alpha.model import AudioTokenizer
+from tokenizer.alpha.model import SpeechTokenizer
 
 def test_audio_tokenizer():
     """Test the AudioTokenizer model with sample input."""
@@ -11,7 +11,7 @@ def test_audio_tokenizer():
     rngs = nnx.Rngs(params=42)
     
     # Create model
-    model = AudioTokenizer(
+    model = SpeechTokenizer(
         hidden_size=128,  # Smaller for testing
         encoder_depth=2,
         encoder_heads=4,
