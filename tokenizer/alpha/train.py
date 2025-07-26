@@ -71,7 +71,6 @@ class TrainingConfig:
     decoder_output_48khz: bool = False
     
     # Training steps
-    total_steps: int = 1_000_000
     warmup_steps: int = 10_000
     
     # Checkpointing and logging
@@ -260,12 +259,23 @@ def prepare_batch(batch: dict) -> dict:
 # Training Steps (JIT-compiled)
 # ============================================================================
 
-@partial(nnx.jit, static_argnums=(2,))
+@partial(nnx.jit, static_argnums=(10,))
 def train_discriminator_step(
-    state: TrainingState,
-    batch: dict,
+    # Individual modules
+    generator: SpeechTokenizer,
+    msd: MultiScaleDiscriminator,
+    mpd: MultiPeriodDiscriminator,
+    stftd: STFTDiscriminator,
+    msd_optimizer: nnx.Optimizer,
+    mpd_optimizer: nnx.Optimizer,
+    stftd_optimizer: nnx.Optimizer,
+    # Batch arrays
+    audio: jax.Array,
+    encoder_causal_mask: jax.Array,
+    padding_mask: jax.Array, # Mentioned before; This might be consumed by discriminator modules later for more accuracy
+    # Static config
     loss_type: str = "lsgan"
-) -> Tuple[dict, TrainingState]:
+) -> Tuple[dict, Tuple[SpeechTokenizer, MultiScaleDiscriminator, MultiPeriodDiscriminator, STFTDiscriminator]]:
     """Train discriminators for one step."""
     
     # Select loss function based on type
@@ -275,12 +285,12 @@ def train_discriminator_step(
         disc_loss_fn = compute_discriminator_loss_hinge
     
     # Get real audio
-    real_audio = batch['audio']
+    real_audio = audio
     
     # Generate fake audio (no gradients for generator)
-    fake_audio, _, _, _ = state.generator(
+    fake_audio, _, _, _ = generator(
         real_audio, 
-        batch['encoder_causal_mask']
+        encoder_causal_mask
     )
     fake_audio = jax.lax.stop_gradient(fake_audio)
     
@@ -292,8 +302,8 @@ def train_discriminator_step(
         return loss, metrics
     
     grad_fn = nnx.value_and_grad(msd_loss_fn, has_aux=True)
-    (msd_loss, msd_metrics), msd_grads = grad_fn(state.msd)
-    state.msd_optimizer.update(msd_grads)
+    (msd_loss, msd_metrics), msd_grads = grad_fn(msd)
+    msd_optimizer.update(msd_grads)
     
     # === Multi-Period Discriminator ===
     def mpd_loss_fn(mpd):
@@ -303,8 +313,8 @@ def train_discriminator_step(
         return loss, metrics
     
     grad_fn = nnx.value_and_grad(mpd_loss_fn, has_aux=True)
-    (mpd_loss, mpd_metrics), mpd_grads = grad_fn(state.mpd)
-    state.mpd_optimizer.update(mpd_grads)
+    (mpd_loss, mpd_metrics), mpd_grads = grad_fn(mpd)
+    mpd_optimizer.update(mpd_grads)
     
     # === STFT Discriminator ===
     def stftd_loss_fn(stftd):
@@ -314,8 +324,8 @@ def train_discriminator_step(
         return loss, metrics
     
     grad_fn = nnx.value_and_grad(stftd_loss_fn, has_aux=True)
-    (stftd_loss, stftd_metrics), stftd_grads = grad_fn(state.stftd)
-    state.stftd_optimizer.update(stftd_grads)
+    (stftd_loss, stftd_metrics), stftd_grads = grad_fn(stftd)
+    stftd_optimizer.update(stftd_grads)
     
     # Combine metrics
     metrics = {
@@ -325,19 +335,45 @@ def train_discriminator_step(
         'disc/total': msd_loss + mpd_loss + stftd_loss,
     }
     
-    return metrics, state
+    return metrics, (generator, msd, mpd, stftd)
 
 
-@partial(nnx.jit, static_argnums=(2,))
+@partial(nnx.jit, static_argnums=(12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26))
 def train_generator_step(
-    state: TrainingState,
-    batch: dict,
-    loss_weights: dict
-) -> Tuple[dict, TrainingState]:
+    # Individual modules
+    generator: SpeechTokenizer,
+    msd: MultiScaleDiscriminator,
+    mpd: MultiPeriodDiscriminator,
+    stftd: STFTDiscriminator,
+    gen_optimizer: nnx.Optimizer,
+    # Batch arrays
+    audio: jax.Array,
+    encoder_causal_mask: jax.Array,
+    padding_mask: jax.Array,
+    encoder_mask: jax.Array,
+    phonemes: jax.Array,
+    phoneme_mask: jax.Array,
+    # Loss weights (static)
+    loss_type: str,
+    w_l1: float,
+    w_l2: float,
+    w_mel: float,
+    w_stft_sc: float,
+    w_stft_lm: float,
+    w_vq_commit: float,
+    w_bsq_commit: float,
+    w_adversarial: float,
+    w_feature_match: float,
+    w_ctc: float,
+    # Extra static params for generator loss
+    stft_fft_sizes: tuple = (2048, 1024, 512, 256, 128),
+    stft_hop_sizes: tuple = (512, 256, 128, 64, 32),
+    stft_win_sizes: tuple = (2048, 1024, 512, 256, 128)
+) -> Tuple[dict, SpeechTokenizer]:
     """Train generator for one step."""
     
     # Select loss function based on config
-    if loss_weights.get('loss_type', 'lsgan') == 'lsgan':
+    if loss_type == 'lsgan':
         gen_loss_fn = compute_generator_loss_lsgan
     else:
         gen_loss_fn = compute_generator_loss_hinge
@@ -345,8 +381,8 @@ def train_generator_step(
     def generator_loss(generator):
         # Forward pass
         reconstructed, phoneme_indices, acoustic_codes, encoder_output = generator(
-            batch['audio'],
-            batch['encoder_causal_mask']
+            audio,
+            encoder_causal_mask
         )
         
         # Get quantizer outputs for loss computation
@@ -367,28 +403,26 @@ def train_generator_step(
         phoneme_logits = quantizer.get_phoneme_logits(encoder_output)
         
         # Get discriminator outputs (no gradients for discriminators)
-        msd_fake, msd_feat_fake = state.msd(reconstructed, training=False)
-        msd_real, msd_feat_real = state.msd(batch['audio'], training=False)
+        msd_fake, msd_feat_fake = msd(reconstructed, training=False)
+        msd_real, msd_feat_real = msd(audio, training=False)
         
-        mpd_fake, mpd_feat_fake = state.mpd(reconstructed)
-        mpd_real, mpd_feat_real = state.mpd(batch['audio'])
+        mpd_fake, mpd_feat_fake = mpd(reconstructed)
+        mpd_real, mpd_feat_real = mpd(audio)
         
-        stftd_fake, stftd_feat_fake = state.stftd(reconstructed, training=False)
-        stftd_real, stftd_feat_real = state.stftd(batch['audio'], training=False)
+        stftd_fake, stftd_feat_fake = stftd(reconstructed, training=False)
+        stftd_real, stftd_feat_real = stftd(audio, training=False)
         
         # Combine discriminator outputs
         disc_outputs = msd_fake + mpd_fake + stftd_fake
         disc_features_real = msd_feat_real + mpd_feat_real + stftd_feat_real
         disc_features_fake = msd_feat_fake + mpd_feat_fake + stftd_feat_fake
         
-        # Prepare masks
-        padding_mask = batch.get('padding_mask_2d', batch['padding_mask'][:, 0, 0, :])
-        encoder_mask = batch['encoder_mask']
+        # Masks are already passed as arguments
         
         # Compute generator losses
         gen_loss, gen_metrics = gen_loss_fn(
             pred_audio=reconstructed,
-            target_audio=batch['audio'],
+            target_audio=audio,
             encoder_output=encoder_output,
             vq_quantized=vq_quantized,
             bsq_quantized=bsq_quantized,
@@ -398,19 +432,30 @@ def train_generator_step(
             disc_features_fake=disc_features_fake,
             padding_mask=padding_mask,
             encoder_mask=encoder_mask,
-            **{k: v for k, v in loss_weights.items() if k.startswith('w_')}
+            w_l1=w_l1,
+            w_l2=w_l2,
+            w_mel=w_mel,
+            w_stft_sc=w_stft_sc,
+            w_stft_lm=w_stft_lm,
+            w_vq_commit=w_vq_commit,
+            w_bsq_commit=w_bsq_commit,
+            w_adversarial=w_adversarial,
+            w_feature_match=w_feature_match,
+            stft_fft_sizes=stft_fft_sizes,
+            stft_hop_sizes=stft_hop_sizes,
+            stft_win_sizes=stft_win_sizes
         )
         
         # Compute CTC loss
         ctc_loss, ctc_metrics = phoneme_ctc_loss(
             phoneme_logits=phoneme_logits,
             encoder_mask=encoder_mask,
-            phoneme_indices=batch['phonemes'],
-            phoneme_mask=batch['phoneme_mask']
+            phoneme_indices=phonemes,
+            phoneme_mask=phoneme_mask
         )
         
         # Total loss
-        total_loss = gen_loss + loss_weights.get('w_ctc', 10.0) * ctc_loss
+        total_loss = gen_loss + w_ctc * ctc_loss
         
         # Update metrics
         gen_metrics.update({
@@ -423,10 +468,10 @@ def train_generator_step(
     
     # Compute gradients and update
     grad_fn = nnx.value_and_grad(generator_loss, has_aux=True)
-    (loss, metrics), grads = grad_fn(state.generator)
-    state.gen_optimizer.update(grads)
+    (loss, metrics), grads = grad_fn(generator)
+    gen_optimizer.update(grads)
     
-    return metrics, state
+    return metrics, generator
 
 
 # ============================================================================
@@ -509,7 +554,6 @@ def log_metrics(step: int, metrics: dict, config: TrainingConfig):
 def train(config: TrainingConfig):
     """Main training function."""
     print("Starting training...")
-    print(f"Total steps: {config.total_steps}")
     print(f"Batch size: {config.batch_size}")
     print(f"Gradient accumulation: {config.gradient_accumulation_steps}")
     
@@ -525,37 +569,89 @@ def train(config: TrainingConfig):
     
     # Training loop
     start_time = time.time()
-    for step in range(config.total_steps):
+    step = 0
+    while True:  # Run indefinitely
         # Load and prepare batch
         batch = next(data_iter)
         batch = prepare_batch(batch)
         
+        # Extract arrays from batch
+        audio = batch['audio']
+        encoder_causal_mask = batch['encoder_causal_mask']
+        padding_mask = batch.get('padding_mask_2d', batch['padding_mask'][:, 0, 0, :])
+        encoder_mask = batch['encoder_mask']
+        phonemes = batch['phonemes']
+        phoneme_mask = batch['phoneme_mask']
+        
         # Train discriminators
         if step < config.profile_first_n_steps:
-            disc_metrics, state = profile_step(
+            disc_metrics, (_, new_msd, new_mpd, new_stftd) = profile_step(
                 step, profile_dir,
                 train_discriminator_step,
-                state, batch, config.loss_type
+                state.generator, state.msd, state.mpd, state.stftd,
+                state.msd_optimizer, state.mpd_optimizer, state.stftd_optimizer,
+                audio, encoder_causal_mask, padding_mask,
+                config.loss_type
             )
         else:
-            disc_metrics, state = train_discriminator_step(
-                state, batch, config.loss_type
+            disc_metrics, (_, new_msd, new_mpd, new_stftd) = train_discriminator_step(
+                state.generator, state.msd, state.mpd, state.stftd,
+                state.msd_optimizer, state.mpd_optimizer, state.stftd_optimizer,
+                audio, encoder_causal_mask, padding_mask,
+                config.loss_type
             )
+        
+        # Update discriminator models
+        state.msd = new_msd
+        state.mpd = new_mpd
+        state.stftd = new_stftd
         
         # Train generator
         if step < config.profile_first_n_steps:
-            gen_metrics, state = profile_step(
+            gen_metrics, new_generator = profile_step(
                 step, profile_dir,
                 train_generator_step,
-                state, batch, config.loss_weights
+                state.generator, state.msd, state.mpd, state.stftd,
+                state.gen_optimizer,
+                audio, encoder_causal_mask, padding_mask, encoder_mask,
+                phonemes, phoneme_mask,
+                config.loss_type,
+                config.loss_weights['l1'],
+                config.loss_weights['l2'],
+                config.loss_weights['mel'],
+                config.loss_weights['stft_sc'],
+                config.loss_weights['stft_lm'],
+                config.loss_weights['vq_commit'],
+                config.loss_weights['bsq_commit'],
+                config.loss_weights['adversarial'],
+                config.loss_weights['feature_match'],
+                config.loss_weights['ctc']
             )
         else:
-            gen_metrics, state = train_generator_step(
-                state, batch, config.loss_weights
+            gen_metrics, new_generator = train_generator_step(
+                state.generator, state.msd, state.mpd, state.stftd,
+                state.gen_optimizer,
+                audio, encoder_causal_mask, padding_mask, encoder_mask,
+                phonemes, phoneme_mask,
+                config.loss_type,
+                config.loss_weights['l1'],
+                config.loss_weights['l2'],
+                config.loss_weights['mel'],
+                config.loss_weights['stft_sc'],
+                config.loss_weights['stft_lm'],
+                config.loss_weights['vq_commit'],
+                config.loss_weights['bsq_commit'],
+                config.loss_weights['adversarial'],
+                config.loss_weights['feature_match'],
+                config.loss_weights['ctc']
             )
+        
+        # Update generator model
+        state.generator = new_generator
         
         # Update step
         state.step = step
+        step += 1
         
         # Logging
         if step % config.log_every == 0:
@@ -575,9 +671,8 @@ def train(config: TrainingConfig):
             print("JIT compilation should be complete now")
             print(f"Training speed: {steps_per_sec:.2f} steps/sec\n")
     
-    # Final checkpoint
-    save_checkpoint(state, config.total_steps, config.checkpoint_dir)
-    print("Training complete!")
+    # This part is now unreachable since we run indefinitely
+    # User can stop training manually with Ctrl+C
 
 
 # ============================================================================
