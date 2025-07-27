@@ -43,7 +43,7 @@ def compute_ctc_loss(
         blank_id=blank_id,
         log_epsilon=log_epsilon
     )
-    
+
     return ctc_losses
 
 
@@ -53,7 +53,7 @@ def phoneme_ctc_loss(
     phoneme_indices: jax.Array,
     phoneme_mask: jax.Array,
     blank_id: int = 0,
-    reduction: str = 'mean'
+    reduction: str = "mean"
 ) -> tuple[jax.Array, dict]:
     """Compute phoneme CTC loss with proper masking.
     
@@ -79,7 +79,7 @@ def phoneme_ctc_loss(
     # encoder_mask shape: [B, T] with True = valid
     # Need: [B, T] with 1.0 = padded
     logit_paddings = 1.0 - encoder_mask.astype(jnp.float32)  # Invert: 1.0 = padded
-    
+
     # Compute CTC loss
     ctc_losses = compute_ctc_loss(
         logits=phoneme_logits,
@@ -88,30 +88,30 @@ def phoneme_ctc_loss(
         label_paddings=phoneme_mask,  # Must be in CTC format, 1.0 for padded and 0.0 for not. Should be from the batch.
         blank_id=blank_id # 0
     )
-    
+
     # Apply reduction
-    if reduction == 'mean':
+    if reduction == "mean":
         loss = jnp.mean(ctc_losses)
-    elif reduction == 'sum':
+    elif reduction == "sum":
         loss = jnp.sum(ctc_losses)
     else:  # 'none'
         loss = ctc_losses
-    
+
     # Should be commented out after test, very niche.
     # Count valid frames and phonemes for monitoring
     valid_frames = jnp.sum(encoder_mask)
     valid_phonemes = jnp.sum(1.0 - phoneme_mask)  # Invert mask to count valid
-    
+
     # Compute per-sequence accuracy (greedy decoding)
     predictions = jnp.argmax(phoneme_logits, axis=-1)  # [B, T]
-    
+
     metrics = {
-        'ctc_loss': loss,
-        'valid_frames': valid_frames,
-        'valid_phonemes': valid_phonemes,
-        'blank_predictions': jnp.sum(predictions == blank_id) / valid_frames,
+        "ctc_loss": loss,
+        "valid_frames": valid_frames,
+        "valid_phonemes": valid_phonemes,
+        "blank_predictions": jnp.sum(predictions == blank_id) / valid_frames,
     }
-    
+
     return loss, metrics
 
 """

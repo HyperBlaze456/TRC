@@ -1,13 +1,14 @@
+from flax import nnx
 import jax
 import jax.numpy as jnp
-from flax import nnx
+
 
 class PeriodDiscriminator(nnx.Module):
     """Single period discriminator sub-network."""
-    
+
     def __init__(self, period: int, kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
         self.period = period
-        
+
         self.convs = [
             nnx.Conv(1, 32, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
             nnx.Conv(32, 128, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
@@ -15,9 +16,9 @@ class PeriodDiscriminator(nnx.Module):
             nnx.Conv(512, 1024, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
             nnx.Conv(1024, 1024, kernel_size=(kernel_size, 1), strides=(1, 1), padding=((2, 2), (0, 0)), rngs=rngs),
         ]
-        
+
         self.conv_post = nnx.Conv(1024, 1, kernel_size=(3, 1), strides=(1, 1), padding=((1, 1), (0, 0)), rngs=rngs) # This can be linear.
-        
+
     def __call__(self, x: jax.Array) -> tuple[jax.Array, list[jax.Array]]:
         """
         Args:
@@ -28,39 +29,39 @@ class PeriodDiscriminator(nnx.Module):
             feature_maps: List of intermediate feature maps for feature matching loss
         """
         batch_size, time_steps = x.shape
-        
+
         # Pad to make time divisible by period
         if time_steps % self.period != 0:
             pad_size = self.period - (time_steps % self.period)
-            x = jnp.pad(x, ((0, 0), (0, pad_size)), mode='reflect')
+            x = jnp.pad(x, ((0, 0), (0, pad_size)), mode="reflect")
             time_steps = x.shape[1]
-        
+
         # Reshape to 2D representation: [B, T/P, P]
         x = x.reshape(batch_size, time_steps // self.period, self.period)
-        
+
         # Add channel dimension: [B, T/P, P, 1]
         x = jnp.expand_dims(x, axis=-1)
-        
+
         # Apply convolutions
         feature_maps = []
         for conv in self.convs:
             x = conv(x)
             x = nnx.leaky_relu(x, negative_slope=0.1)
             feature_maps.append(x)
-        
+
         # Final convolution
         x = self.conv_post(x)
         feature_maps.append(x)
-        
+
         # Flatten output: [B, T', 1]
         x = x.reshape(batch_size, -1, 1)
-        
+
         return x, feature_maps
 
 
 class MultiPeriodDiscriminator(nnx.Module):
     """Multi-Period Discriminator (MPD) from HiFi-GAN."""
-    
+
     def __init__(self, periods: list[int] = [2, 3, 5, 7, 11], kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
         """
         Args:
@@ -73,7 +74,7 @@ class MultiPeriodDiscriminator(nnx.Module):
             PeriodDiscriminator(period, kernel_size, stride, rngs)
             for period in periods
         ]
-    
+
     def __call__(self, x: jax.Array) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         """
         Args:
@@ -86,13 +87,13 @@ class MultiPeriodDiscriminator(nnx.Module):
         # Handle [B, T, 1] input
         if x.ndim == 3 and x.shape[-1] == 1:
             x = x.squeeze(-1)
-        
+
         outputs = []
         all_feature_maps = []
-        
+
         for discriminator in self.discriminators:
             output, features = discriminator(x)
             outputs.append(output)
             all_feature_maps.append(features)
-        
+
         return outputs, all_feature_maps

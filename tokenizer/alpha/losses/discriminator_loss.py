@@ -5,18 +5,18 @@ This module implements LSGAN and Hinge losses for discriminator training.
 All functions are designed to be JIT-compatible for efficient training.
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
 import optax
-from functools import partial
-
 
 # ============================================================================
 # LSGAN Discriminator Loss
 # ============================================================================
 
 def lsgan_d_loss(
-    real_outputs: list[jax.Array], 
+    real_outputs: list[jax.Array],
     fake_outputs: list[jax.Array]
 ) -> jax.Array:
     """LSGAN discriminator loss.
@@ -31,13 +31,13 @@ def lsgan_d_loss(
         Scalar discriminator loss
     """
     total_loss = 0.0
-    
-    for real_out, fake_out in zip(real_outputs, fake_outputs):
+
+    for real_out, fake_out in zip(real_outputs, fake_outputs, strict=False):
         # Discriminator wants to output 1 for real, 0 for fake
         real_loss = jnp.mean(jnp.square(real_out - 1))
         fake_loss = jnp.mean(jnp.square(fake_out))
         total_loss += real_loss + fake_loss
-    
+
     return total_loss / len(real_outputs)
 
 
@@ -46,7 +46,7 @@ def lsgan_d_loss(
 # ============================================================================
 
 def hinge_d_loss(
-    real_outputs: list[jax.Array], 
+    real_outputs: list[jax.Array],
     fake_outputs: list[jax.Array]
 ) -> jax.Array:
     """Hinge discriminator loss using optax.
@@ -61,17 +61,17 @@ def hinge_d_loss(
         Scalar discriminator loss
     """
     total_loss = 0.0
-    
-    for real_out, fake_out in zip(real_outputs, fake_outputs):
+
+    for real_out, fake_out in zip(real_outputs, fake_outputs, strict=False):
         # Using optax hinge loss
         # For real: we want output > 1, so target = 1, margin = 0
         real_loss = jnp.mean(optax.hinge_loss(real_out, jnp.ones_like(real_out)))
-        
+
         # For fake: we want output < -1, so target = -1, margin = 0
         fake_loss = jnp.mean(optax.hinge_loss(fake_out, -jnp.ones_like(fake_out)))
-        
+
         total_loss += real_loss + fake_loss
-    
+
     return total_loss / len(real_outputs)
 
 
@@ -81,7 +81,7 @@ def hinge_d_loss(
 
 def compute_discriminator_loss(
     disc_outputs_real: list[jax.Array],
-    disc_outputs_fake: list[jax.Array], 
+    disc_outputs_fake: list[jax.Array],
     loss_type: str = "lsgan"
 ) -> tuple[jax.Array, dict]:
     """Compute discriminator loss.
@@ -102,17 +102,17 @@ def compute_discriminator_loss(
         d_loss = hinge_d_loss(disc_outputs_real, disc_outputs_fake)
     else:
         raise ValueError(f"Unknown loss type: {loss_type}")
-    
+
     # Compute average predictions for monitoring
     avg_real = jnp.mean(jnp.concatenate([out.flatten() for out in disc_outputs_real]))
     avg_fake = jnp.mean(jnp.concatenate([out.flatten() for out in disc_outputs_fake]))
-    
+
     metrics = {
-        'd_loss': d_loss,
-        'd_real_avg': avg_real,
-        'd_fake_avg': avg_fake,
+        "d_loss": d_loss,
+        "d_real_avg": avg_real,
+        "d_fake_avg": avg_fake,
     }
-    
+
     return d_loss, metrics
 
 
@@ -120,6 +120,6 @@ def compute_discriminator_loss(
 # JIT-compatible versions using partial for static arguments
 # ============================================================================
 
-# Discriminator loss functions with static loss_type  
+# Discriminator loss functions with static loss_type
 compute_discriminator_loss_lsgan = partial(compute_discriminator_loss, loss_type="lsgan")
 compute_discriminator_loss_hinge = partial(compute_discriminator_loss, loss_type="hinge")

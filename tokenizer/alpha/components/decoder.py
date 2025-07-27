@@ -1,7 +1,8 @@
-import jax
 from flax import nnx
+import jax
 
 from tokenizer.utils.activation import Snake
+
 
 class CausalConvTranspose(nnx.Module):
     def __init__(
@@ -25,7 +26,7 @@ class CausalConvTranspose(nnx.Module):
             out_features = out_features,
             kernel_size = kernel_size,
             strides = stride,
-            padding = 'VALID',
+            padding = "VALID",
             kernel_dilation= dilation,
             use_bias = use_bias,
             rngs = rngs,
@@ -108,7 +109,7 @@ class RawDecoder(nnx.Module):
                 stride=2,
                 rngs=rngs,
             )
-    
+
     def __call__(self, x: jax.Array) -> jax.Array:
         """
         Args:
@@ -120,18 +121,18 @@ class RawDecoder(nnx.Module):
         # Progressive upsampling (reverse of encoder)
         x = self.deconv4(x)
         x = self.snake4(x)
-        
+
         x = self.deconv3(x)
         x = self.snake3(x)
-        
+
         x = self.deconv2(x)
         x = self.snake2(x)
-        
+
         x = self.deconv1(x)
         # No activation after final layer to allow full waveform range
-        
+
         # Optional 24kHz to 48kHz upsampling if needed.
         if self.output_48khz:
             x = self.deconv_to48(x)
-        
+
         return x

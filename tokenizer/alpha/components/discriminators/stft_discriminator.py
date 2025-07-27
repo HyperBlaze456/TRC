@@ -1,19 +1,19 @@
+
+from flax import nnx
 import jax
 import jax.numpy as jnp
-from flax import nnx
-from typing import List, Tuple, Optional
 
 
 class STFTDiscriminator(nnx.Module):
     """Multi-resolution STFT discriminator. Proposed from SoundStream, used in DAC too."""
 
     def __init__(self,
-                 fft_sizes: List[int] = (2048, 1024, 512),
-                 hop_lengths: Optional[List[int]] = None,
-                 win_lengths: Optional[List[int]] = None,
-                 channels: List[int] = (32, 64, 128, 256, 512),
-                 kernel_size: Tuple[int, int] = (3, 9),
-                 strides: Tuple[int, int] = (1, 2),
+                 fft_sizes: list[int] = (2048, 1024, 512),
+                 hop_lengths: list[int] | None = None,
+                 win_lengths: list[int] | None = None,
+                 channels: list[int] = (32, 64, 128, 256, 512),
+                 kernel_size: tuple[int, int] = (3, 9),
+                 strides: tuple[int, int] = (1, 2),
                  padding: str = "SAME",
                  rngs: nnx.Rngs = None):
         if rngs is None:
@@ -56,7 +56,7 @@ class STFTDiscriminator(nnx.Module):
         spec = jnp.fft.rfft(frames, n=fft_size, axis=-1)
         return spec
 
-    def _pad_to_max(self, feats: List[jax.Array]) -> jax.Array:
+    def _pad_to_max(self, feats: list[jax.Array]) -> jax.Array:
         """Zero‑pad each [B, 2, F, T] to common size and stack on axis‑0."""
         f_max = max(t.shape[2] for t in feats)
         t_max = max(t.shape[3] for t in feats)
@@ -67,13 +67,13 @@ class STFTDiscriminator(nnx.Module):
                   for f in feats]
         return jnp.stack(padded, 0)
 
-    def __call__(self, x: jax.Array, *, training: bool = True) -> Tuple[List[jax.Array], List[List[jax.Array]]]:
+    def __call__(self, x: jax.Array, *, training: bool = True) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         outputs = []
         all_features = []
 
         for i, (fft, hop, win) in enumerate(zip(self.fft_sizes,
                                                 self.hop_lengths,
-                                                self.win_lengths)):
+                                                self.win_lengths, strict=False)):
             # Compute STFT
             spec = self._stft(x, fft, hop, win)
 
@@ -92,9 +92,9 @@ class STFTResolutionDiscriminator(nnx.Module):
     """2D Conv discriminator for a single STFT resolution (no batch norm)."""
 
     def __init__(self,
-                 channels: List[int],
-                 kernel_size: Tuple[int, int],
-                 strides: Tuple[int, int],
+                 channels: list[int],
+                 kernel_size: tuple[int, int],
+                 strides: tuple[int, int],
                  padding: str,
                  rngs: nnx.Rngs):
         self.convs = []
@@ -115,7 +115,7 @@ class STFTResolutionDiscriminator(nnx.Module):
                                  padding=padding,
                                  rngs=rngs)
 
-    def __call__(self, x: jax.Array, *, training: bool) -> Tuple[jax.Array, List[jax.Array]]:
+    def __call__(self, x: jax.Array, *, training: bool) -> tuple[jax.Array, list[jax.Array]]:
         # Input must be in the shape of [B, T_f, F, 2]. That 2 is the channel.
         # Apply conv layers with ELU activation
         features = []

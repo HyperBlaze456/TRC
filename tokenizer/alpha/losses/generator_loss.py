@@ -6,11 +6,12 @@ in a GAN-based audio codec, following the DAC (Descript Audio Codec) approach.
 All functions are JIT-compatible with no conditional logic.
 """
 
+from functools import partial
+
 import jax
 import jax.numpy as jnp
-from functools import partial
-from tokenizer.utils.mel import MelSpectrogramJAX
 
+from tokenizer.utils.mel import MelSpectrogramJAX
 
 # ============================================================================
 # Reconstruction Losses (Time Domain)
@@ -33,7 +34,7 @@ def l1_loss(
     """
     # Expand mask to match audio shape
     mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
-    
+
     loss = jnp.abs(predictions - targets)
     loss = loss * mask
     return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
@@ -56,7 +57,7 @@ def l2_loss(
     """
     # Expand mask to match audio shape
     mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
-    
+
     loss = jnp.square(predictions - targets)
     loss = loss * mask
     return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
@@ -95,15 +96,15 @@ def mel_spectrogram_loss(
     # Compute mel spectrograms
     pred_mel = jax.vmap(mel_transform_24k)(predictions)  # [B, n_mels, n_frames]
     target_mel = jax.vmap(mel_transform_24k)(targets)  # [B, n_mels, n_frames]
-    
+
     # Convert to log scale
     eps = 1e-5
     pred_log_mel = jnp.log(pred_mel + eps)
     target_log_mel = jnp.log(target_mel + eps)
-    
+
     # L1 loss
     loss = jnp.abs(pred_log_mel - target_log_mel)
-    
+
     # Create mel-domain mask from time-domain mask
     # Downsample mask to match mel frames
     hop_length = 256
@@ -112,7 +113,7 @@ def mel_spectrogram_loss(
     indices = jnp.minimum(indices, mask.shape[1] - 1)
     mask_mel = mask[:, indices]  # [B, n_frames]
     mask_mel = jnp.expand_dims(mask_mel, axis=1)  # [B, 1, n_frames]
-    
+
     loss = loss * mask_mel
     return jnp.sum(loss) / jnp.maximum(jnp.sum(mask_mel), 1.0)
 
@@ -144,33 +145,33 @@ def stft_loss(
     # Compute STFT
     pred_stft = jax.vmap(lambda x: jnp.fft.rfft(x, n=n_fft))(predictions)
     target_stft = jax.vmap(lambda x: jnp.fft.rfft(x, n=n_fft))(targets)
-    
+
     pred_mag = jnp.abs(pred_stft)
     target_mag = jnp.abs(target_stft)
-    
+
     # Spectral convergence loss
     diff = pred_mag - target_mag
     sc_num = jnp.sqrt(jnp.sum(jnp.square(diff), axis=-1))
     sc_den = jnp.sqrt(jnp.sum(jnp.square(target_mag), axis=-1)) + 1e-6
     sc_loss = sc_num / sc_den
-    
+
     # Log magnitude loss
     eps = 1e-5
     lm_loss = jnp.abs(jnp.log(pred_mag + eps) - jnp.log(target_mag + eps))
-    
+
     # Apply mask - for simplified FFT, we need to handle single-frame output
     # STFT on full signal produces shape [B, n_fft//2 + 1]
     # We'll use the first element of mask as a simple scalar mask
     mask_scalar = mask[:, 0]  # [B]
-    
+
     sc_loss = sc_loss * mask_scalar
     sc_loss = jnp.sum(sc_loss) / jnp.maximum(jnp.sum(mask_scalar), 1.0)
-    
+
     # For log magnitude, we need to handle [B, n_freqs] shape
     mask_freq = jnp.expand_dims(mask_scalar, axis=-1)  # [B, 1]
     lm_loss = lm_loss * mask_freq
     lm_loss = jnp.sum(lm_loss) / jnp.maximum(jnp.sum(mask_freq), 1.0)
-    
+
     return sc_loss, lm_loss
 
 
@@ -200,11 +201,11 @@ def multi_resolution_stft_loss(
     sc1, lm1 = stft_loss_512(predictions, targets, mask)
     sc2, lm2 = stft_loss_1024(predictions, targets, mask)
     sc3, lm3 = stft_loss_2048(predictions, targets, mask)
-    
+
     # Average over resolutions
     total_sc = (sc1 + sc2 + sc3) / 3.0
     total_lm = (lm1 + lm2 + lm3) / 3.0
-    
+
     return total_sc, total_lm
 
 
@@ -231,7 +232,7 @@ def vq_commitment_loss(
     """
     # Expand mask to match encoder shape
     mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
-    
+
     loss = jnp.square(encoder_output - jax.lax.stop_gradient(quantized))
     loss = loss * mask
     return beta * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
@@ -256,7 +257,7 @@ def bsq_commitment_loss(
     """
     # Expand mask to match encoder shape
     mask = jnp.expand_dims(mask, axis=-1)  # [B, T, 1]
-    
+
     loss = jnp.square(residual - jax.lax.stop_gradient(quantized))
     loss = loss * mask
     return gamma * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
@@ -313,13 +314,13 @@ def feature_matching_loss(
     """
     total_loss = 0.0
     num_features = 0
-    
-    for real_feats, fake_feats in zip(real_features, fake_features):
-        for real_f, fake_f in zip(real_feats, fake_feats):
+
+    for real_feats, fake_feats in zip(real_features, fake_features, strict=False):
+        for real_f, fake_f in zip(real_feats, fake_feats, strict=False):
             loss = jnp.mean(jnp.abs(fake_f - jax.lax.stop_gradient(real_f)))
             total_loss = total_loss + loss
             num_features = num_features + 1
-    
+
     return total_loss / jnp.maximum(num_features, 1)
 
 
@@ -375,18 +376,18 @@ def compute_generator_loss_base(
     # Reconstruction losses
     l1 = l1_loss(pred_audio, target_audio, padding_mask)
     l2 = l2_loss(pred_audio, target_audio, padding_mask)
-    
+
     # Remove channel dimension for spectral losses
     pred_audio_2d = pred_audio[:, :, 0]
     target_audio_2d = target_audio[:, :, 0]
-    
+
     mel = mel_spectrogram_loss(pred_audio_2d, target_audio_2d, padding_mask)
-    
+
     # Multi-resolution STFT losses
     stft_sc, stft_lm = multi_resolution_stft_loss(
         pred_audio_2d, target_audio_2d, padding_mask
     )
-    
+
     # Quantization losses
     vq_commit = vq_commitment_loss(
         encoder_output, vq_quantized, encoder_mask, beta=1.0
@@ -394,11 +395,11 @@ def compute_generator_loss_base(
     bsq_commit = bsq_commitment_loss(
         vq_residual, bsq_quantized, encoder_mask, gamma=1.0
     )
-    
+
     # Adversarial losses
     adversarial = adversarial_loss_fn(disc_outputs)
     feature_match = feature_matching_loss(disc_features_real, disc_features_fake)
-    
+
     # Combine all losses
     total_loss = (
         w_l1 * l1 +
@@ -411,20 +412,20 @@ def compute_generator_loss_base(
         w_adversarial * adversarial +
         w_feature_match * feature_match
     )
-    
+
     metrics = {
-        'l1': l1,
-        'l2': l2,
-        'mel': mel,
-        'stft_sc': stft_sc,
-        'stft_lm': stft_lm,
-        'vq_commit': vq_commit,
-        'bsq_commit': bsq_commit,
-        'adversarial': adversarial,
-        'feature_match': feature_match,
-        'total': total_loss
+        "l1": l1,
+        "l2": l2,
+        "mel": mel,
+        "stft_sc": stft_sc,
+        "stft_lm": stft_lm,
+        "vq_commit": vq_commit,
+        "bsq_commit": bsq_commit,
+        "adversarial": adversarial,
+        "feature_match": feature_match,
+        "total": total_loss
     }
-    
+
     return total_loss, metrics
 
 

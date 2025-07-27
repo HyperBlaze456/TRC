@@ -1,6 +1,6 @@
+
 import jax
 import jax.numpy as jnp
-from typing import Optional, Tuple
 
 
 def create_padding_mask(
@@ -53,7 +53,7 @@ def create_encoder_masks(
         max_length: int,
         downsample_factor: int,
         dtype: jnp.dtype = jnp.bool_
-) -> Tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array]:
     """Create memory-efficient encoder masks at downsampled resolution.
     
     This function creates both non-causal and causal masks directly at the
@@ -71,34 +71,34 @@ def create_encoder_masks(
     """
     batch_size = lengths.shape[0]
     encoder_max_length = max_length // downsample_factor
-    
+
     # Create encoder lengths
     # A frame is valid if it contains ANY valid audio sample
     encoder_lengths = jnp.ceil(lengths / downsample_factor).astype(jnp.int32)
-    
+
     # Create position indices at encoder resolution
     positions = jnp.arange(encoder_max_length)[None, :]  # [1, T']
-    
+
     # Create padding mask at encoder resolution
     padding_mask = positions < encoder_lengths[:, None]  # [B, T']
-    
+
     # Non-causal mask for encoder (2D)
     encoder_mask = padding_mask  # [B, T']
-    
+
     # Causal mask at encoder resolution (much smaller than audio resolution)
     causal_mask = jnp.tril(jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype))  # [T', T']
-    
+
     # Combine with padding mask
     padding_mask_expanded = padding_mask[:, None, :]  # [B, 1, T']
     encoder_causal_mask = padding_mask_expanded & causal_mask[None, :, :]  # [B, T', T']
-    
+
     return encoder_mask.astype(dtype), encoder_causal_mask.astype(dtype)
 
 
 def downsample_mask(
-        mask: Optional[jax.Array],
+        mask: jax.Array | None,
         downsample_factor: int
-) -> Optional[jax.Array]:
+) -> jax.Array | None:
     """Downsample attention mask to match encoder output time dimension.
 
     Args:
@@ -156,7 +156,7 @@ def pad_sequences_left(
         sequences: list[jax.Array],
         max_length: int = None,
         pad_value: float = 0.0
-) -> Tuple[jax.Array, jax.Array]:
+) -> tuple[jax.Array, jax.Array]:
     """Pad sequences with left-padding to create a batch.
 
     Args:
@@ -206,7 +206,6 @@ def combine_masks(
     """
     if operation == "and":
         return mask1 & mask2
-    elif operation == "or":
+    if operation == "or":
         return mask1 | mask2
-    else:
-        raise ValueError(f"Unknown operation: {operation}")
+    raise ValueError(f"Unknown operation: {operation}")
