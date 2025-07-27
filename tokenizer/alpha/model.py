@@ -1,9 +1,10 @@
 from flax import nnx
 import jax
 
+from tokenizer.alpha.components.decoder import RawDecoder
 from tokenizer.alpha.components.encoder import RawEncoder
 from tokenizer.alpha.components.quantizer import PhonemeBSQQuantizer
-from tokenizer.alpha.components.decoder import RawDecoder
+
 
 class SpeechTokenizer(nnx.Module):
     """Main audio tokenizer model with phoneme VQ + acoustic BSQ.
@@ -82,17 +83,21 @@ class SpeechTokenizer(nnx.Module):
             phoneme_indices: Phoneme codebook indices [B, T']
             acoustic_codes: Binary acoustic codes [B, T', spherical_dim]
             encoder_output: Encoder output before quantization [B, T', D]
+            phoneme_logits: Phoneme log probabilities [B, T', phoneme_codebook_size]
+            vq_quantized: VQ output for commitment loss [B, T', D]
+            bsq_quantized: BSQ output for commitment loss [B, T', D]
+            vq_residual: Residual before BSQ for commitment loss [B, T', D]
         """
         # Encode audio to latent representation with pre-computed mask
         encoder_output = self.encoder(x, mask=mask)
 
-        # Quantize with phoneme VQ + acoustic BSQ
-        quantized, phoneme_indices, acoustic_codes = self.quantizer(encoder_output)
+        # Quantize with phoneme VQ + acoustic BSQ - now returns 7 values
+        quantized, phoneme_indices, acoustic_codes, phoneme_logits, vq_quantized, bsq_quantized, vq_residual = self.quantizer(encoder_output)
 
         # Decode back to audio
         reconstructed = self.decoder(quantized)
 
-        return reconstructed, phoneme_indices, acoustic_codes, encoder_output
+        return reconstructed, phoneme_indices, acoustic_codes, encoder_output, phoneme_logits, vq_quantized, bsq_quantized, vq_residual
 
     def encode(self, x: jax.Array, mask: jax.Array = None):
         """Encode audio to discrete tokens.
