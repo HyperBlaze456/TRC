@@ -70,7 +70,8 @@ def create_encoder_masks(
         encoder_causal_mask: Causal mask at encoder resolution [B, T', T']
     """
     batch_size = lengths.shape[0]
-    encoder_max_length = max_length // downsample_factor
+    # Use ceiling division to match causal convolution output length
+    encoder_max_length = -(-max_length // downsample_factor)  # Ceiling division
 
     # Create encoder lengths
     # A frame is valid if it contains ANY valid audio sample
