@@ -58,28 +58,84 @@ def analyze_discriminator_compilation():
     with open('msd_jaxpr_detailed.txt', 'w') as f:
         f.write(str(jaxpr))
     
-    # Analyze operations
+    # Analyze operations and memory
     op_counts = {}
     conv_ops = []
+    memory_by_op = {}
+    total_memory_bytes = 0
+    
+    # Extract shape information from JAXpr
+    def get_shape_from_var(var):
+        """Extract shape from a JAX variable."""
+        if hasattr(var, 'aval') and hasattr(var.aval, 'shape'):
+            return var.aval.shape
+        return None
+    
+    def estimate_memory(shape, dtype='float32'):
+        """Estimate memory in bytes for a tensor."""
+        if shape is None:
+            return 0
+        elements = 1
+        for dim in shape:
+            elements *= dim
+        bytes_per_element = 4 if dtype == 'float32' else 2  # f32=4, f16/bf16=2
+        return elements * bytes_per_element
+    
+    # Analyze each operation
     for i, eqn in enumerate(jaxpr.eqns):
         op_name = eqn.primitive.name
         op_counts[op_name] = op_counts.get(op_name, 0) + 1
         
+        # Calculate output memory for this operation
+        output_memory = 0
+        for outvar in eqn.outvars:
+            shape = get_shape_from_var(outvar)
+            if shape:
+                mem = estimate_memory(shape)
+                output_memory += mem
+                total_memory_bytes += mem
+        
+        if op_name not in memory_by_op:
+            memory_by_op[op_name] = 0
+        memory_by_op[op_name] += output_memory
+        
         if 'conv' in op_name:
-            conv_ops.append((i, eqn))
+            conv_ops.append((i, eqn, output_memory))
     
     print(f"\nTotal operations: {len(jaxpr.eqns)}")
+    print(f"Total intermediate memory estimate: {total_memory_bytes / (1024**3):.2f} GB")
+    
     print("\nOperation counts:")
     for op, count in sorted(op_counts.items(), key=lambda x: x[1], reverse=True)[:15]:
         print(f"  {op}: {count}")
     
+    print("\nMemory usage by operation type:")
+    for op, mem in sorted(memory_by_op.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"  {op}: {mem / (1024**3):.3f} GB")
+    
     print(f"\nConvolution operations: {len(conv_ops)}")
-    print("\nFirst few convolution details:")
-    for i, (idx, eqn) in enumerate(conv_ops[:5]):
+    print("\nConvolution memory details:")
+    conv_total_memory = 0
+    for i, (idx, eqn, mem) in enumerate(conv_ops[:10]):
+        conv_total_memory += mem
         print(f"\n  Conv {i+1} (equation {idx}):")
         print(f"    Primitive: {eqn.primitive.name}")
+        print(f"    Output memory: {mem / (1024**2):.2f} MB")
+        
+        # Show output shapes
+        for outvar in eqn.outvars:
+            shape = get_shape_from_var(outvar)
+            if shape:
+                print(f"    Output shape: {shape}")
+        
+        # Show params if available
         if hasattr(eqn, 'params'):
-            print(f"    Params: {eqn.params}")
+            relevant_params = {k: v for k, v in eqn.params.items() 
+                             if k in ['window_strides', 'padding', 'feature_group_count']}
+            if relevant_params:
+                print(f"    Params: {relevant_params}")
+    
+    print(f"\nTotal convolution output memory: {conv_total_memory / (1024**3):.2f} GB")
     
     # 2. Analyze MPD
     print("\n" + "="*60)
