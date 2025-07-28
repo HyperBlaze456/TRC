@@ -371,7 +371,7 @@ def train_discriminator_step(
 
 # Arguments 0-10: modules and arrays (not static)
 # Arguments 11-24: static parameters
-@partial(nnx.jit, static_argnums=(11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24))
+@partial(nnx.jit, static_argnums=(11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21))
 def train_generator_step(
         # Individual modules
         generator: SpeechTokenizer,
@@ -673,9 +673,6 @@ def train(config: TrainingConfig):
             print(f"\nProfiling complete. Check {profile_dir} for results")
             print("JIT compilation should be complete now")
             print(f"Training speed: {steps_per_sec:.2f} steps/sec\n")
-
-    # This part is now unreachable since we run indefinitely
-    # User can stop training manually with Ctrl+C
 
 
 # ============================================================================
