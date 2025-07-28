@@ -398,9 +398,6 @@ def train_generator_step(
         w_adversarial: float,
         w_feature_match: float,
         w_ctc: float,
-        stft_fft_sizes: tuple = (2048, 1024, 512, 256, 128),
-        stft_hop_sizes: tuple = (512, 256, 128, 64, 32),
-        stft_win_sizes: tuple = (2048, 1024, 512, 256, 128)
 ) -> tuple[dict, SpeechTokenizer]:
     """Train generator for one step."""
 
@@ -454,9 +451,6 @@ def train_generator_step(
             w_bsq_commit=w_bsq_commit,
             w_adversarial=w_adversarial,
             w_feature_match=w_feature_match,
-            stft_fft_sizes=stft_fft_sizes,
-            stft_hop_sizes=stft_hop_sizes,
-            stft_win_sizes=stft_win_sizes
         )
 
         # Compute CTC loss
