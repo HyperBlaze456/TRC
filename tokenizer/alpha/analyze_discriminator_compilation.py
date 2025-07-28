@@ -20,6 +20,24 @@ from tokenizer.alpha.components.discriminators import (
     MultiScaleDiscriminator,
     STFTDiscriminator,
 )
+from tokenizer.alpha.model import SpeechTokenizer
+
+def get_gpu_memory():
+    """Get current GPU memory usage in bytes."""
+    for device in jax.devices():
+        stats = device.memory_stats()
+        if stats:
+            return stats['bytes_in_use']
+    return 0
+
+def log_memory(label):
+    """Log GPU memory with detailed stats."""
+    for device in jax.devices():
+        stats = device.memory_stats()
+        if stats:
+            used_gb = stats['bytes_in_use'] / (1024**3)
+            print(f"[{label}] GPU memory: {used_gb:.3f} GB")
+    return get_gpu_memory()
 
 def analyze_discriminator_compilation():
     """Analyze the compilation of each discriminator."""
@@ -36,6 +54,9 @@ def analyze_discriminator_compilation():
     # Initialize
     rngs = nnx.Rngs(42)
     audio = jax.random.normal(rngs(), (batch_size, seq_length, 1))
+    
+    # Track initial memory
+    initial_memory = log_memory("Initial")
     
     # 1. Analyze MSD
     print("="*60)
@@ -213,48 +234,122 @@ def analyze_discriminator_compilation():
     
     print(f"\nFFT operations: {len(fft_ops)}")
     
-    # Try to compile and get memory estimates
+    # 4. Analyze SpeechTokenizer
     print("\n" + "="*60)
-    print("4. Compilation Memory Estimates")
+    print("4. SpeechTokenizer Analysis")
     print("="*60)
     
-    # Test smaller sizes to see scaling
-    for test_seq_len in [6000, 12000, 24000]:
-        print(f"\nTesting with sequence length: {test_seq_len}")
-        test_audio = jax.random.normal(rngs(), (2, test_seq_len, 1))
+    hidden_size = 512
+    generator = SpeechTokenizer(
+        hidden_size=hidden_size,
+        encoder_depth=4,
+        encoder_heads=8,
+        phoneme_codebook_size=100,
+        bsq_spherical_dim=256,
+        decoder_output_48khz=False,
+        rngs=rngs,
+    )
+    
+    # Create encoder mask
+    encoder_length = seq_length // 480  # 50Hz
+    encoder_mask = jnp.ones((batch_size, 1, encoder_length, encoder_length), dtype=jnp.bool_)
+    
+    # Extract graphdef and state
+    graphdef_gen, state_gen = nnx.split(generator)
+    
+    def generator_pure(state, audio, mask):
+        model = nnx.merge(graphdef_gen, state)
+        return model(audio, mask)
+    
+    print("\nCreating JAXpr for SpeechTokenizer...")
+    jaxpr_gen = make_jaxpr(generator_pure)(state_gen, audio, encoder_mask)
+    
+    # Count operations
+    op_counts_gen = {}
+    total_gen_memory = 0
+    for i, eqn in enumerate(jaxpr_gen.eqns):
+        op_name = eqn.primitive.name
+        op_counts_gen[op_name] = op_counts_gen.get(op_name, 0) + 1
         
-        # MSD memory estimate
+        # Calculate memory
+        for outvar in eqn.outvars:
+            shape = get_shape_from_var(outvar)
+            if shape:
+                total_gen_memory += estimate_memory(shape)
+    
+    print(f"\nTotal operations: {len(jaxpr_gen.eqns)}")
+    print(f"Total intermediate memory estimate: {total_gen_memory / (1024**3):.2f} GB")
+    
+    print("\nTop operation counts:")
+    for op, count in sorted(op_counts_gen.items(), key=lambda x: x[1], reverse=True)[:10]:
+        print(f"  {op}: {count}")
+    
+    # 5. Compare JAXpr estimates with actual GPU memory
+    print("\n" + "="*60)
+    print("5. JAXpr vs Actual GPU Memory Comparison")
+    print("="*60)
+    
+    # Test compilation with actual memory tracking
+    print("\nTesting actual compilation and memory usage...")
+    
+    # Define test configurations
+    models = [
+        ("SpeechTokenizer", generator_pure, (state_gen, audio, encoder_mask), total_gen_memory),
+        ("MSD", msd_pure, (state, audio), total_memory_bytes),
+        ("MPD", mpd_pure, (state_mpd, audio), None),  # We didn't calculate MPD memory
+        ("STFTD", stftd_pure, (state_stftd, audio), None),  # We didn't calculate STFTD memory
+    ]
+    
+    print(f"\n{'Model':<20} {'JAXpr Est.':<15} {'Pre-JIT':<15} {'Post-JIT':<15} {'JIT Overhead':<15} {'Est. vs Actual'}")
+    print("-" * 95)
+    
+    for model_name, pure_fn, args, jaxpr_estimate in models:
+        # Measure memory before JIT
+        import gc
+        gc.collect()
+        pre_jit_memory = get_gpu_memory()
+        
         try:
-            compiled_msd = jax.jit(lambda s, a: msd_pure(s, a)).lower(state, test_audio)
-            print(f"  MSD compilation successful")
+            # JIT compile
+            jitted_fn = jax.jit(pure_fn)
             
-            # Try to get memory estimate from compiled function
-            hlo_module = compiled_msd.compile()
-            hlo_text = hlo_module.as_text()
+            # First call triggers compilation
+            _ = jitted_fn(*args)
             
-            # Count large allocations in HLO
-            large_allocs = 0
-            for line in hlo_text.split('\n'):
-                if 'f32[' in line:
-                    # Extract dimensions and estimate size
-                    import re
-                    shapes = re.findall(r'f32\[([^\]]+)\]', line)
-                    for shape in shapes:
-                        dims = [int(d.strip()) for d in shape.split(',') if d.strip().isdigit()]
-                        if dims:
-                            size = 1
-                            for d in dims:
-                                size *= d
-                            if size > 1_000_000:  # More than 1M elements
-                                large_allocs += 1
+            # Measure memory after JIT
+            post_jit_memory = get_gpu_memory()
             
-            print(f"  MSD large allocations (>1M elements): {large_allocs}")
+            # Calculate differences
+            jit_overhead_bytes = post_jit_memory - pre_jit_memory
+            jit_overhead_gb = jit_overhead_bytes / (1024**3)
+            
+            if jaxpr_estimate:
+                jaxpr_gb = jaxpr_estimate / (1024**3)
+                ratio = jit_overhead_gb / jaxpr_gb if jaxpr_gb > 0 else 0
+                est_str = f"{jaxpr_gb:.2f} GB"
+                ratio_str = f"{ratio:.1f}x"
+            else:
+                est_str = "N/A"
+                ratio_str = "N/A"
+            
+            print(f"{model_name:<20} {est_str:<15} {pre_jit_memory/(1024**3):.2f} GB{'':<7} "
+                  f"{post_jit_memory/(1024**3):.2f} GB{'':<7} {jit_overhead_gb:.2f} GB{'':<7} {ratio_str}")
             
         except Exception as e:
-            print(f"  MSD compilation failed: {str(e)[:100]}...")
+            print(f"{model_name:<20} {'ERROR: ' + str(e)[:70]}")
+    
+    # Final memory state
+    final_memory = log_memory("\nFinal")
+    print(f"\nTotal memory increase from start: {(final_memory - initial_memory) / (1024**3):.2f} GB")
     
     print("\n" + "="*60)
-    print("Analysis complete! Check the generated .txt files for detailed JAXpr.")
+    print("Analysis complete! Key findings:")
+    print("- JAXpr estimates show theoretical memory for intermediate values")
+    print("- Actual JIT compilation uses significantly more memory due to:")
+    print("  * XLA optimization passes")
+    print("  * Convolution algorithm workspace")
+    print("  * Gradient tape (if training)")
+    print("  * Memory alignment and padding")
     print("="*60)
 
 if __name__ == "__main__":
