@@ -3,6 +3,9 @@
 import os
 import sys
 
+# Set XLA flags to reduce memory usage for convolution algorithms
+os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false --xla_gpu_autotune_level=0"
+
 # Set JAX traceback filtering off for detailed error traces
 os.environ["JAX_TRACEBACK_FILTERING"] = "off"
 
@@ -38,6 +41,7 @@ def test_component_memory():
     hidden_size = 512
     
     print("=== Testing Component Memory Usage ===")
+    print(f"XLA_FLAGS: {os.environ.get('XLA_FLAGS', 'Not set')}")
     print(f"Batch size: {batch_size}")
     print(f"Sequence length: {seq_length} samples")
     
