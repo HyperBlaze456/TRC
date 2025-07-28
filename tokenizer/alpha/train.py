@@ -149,16 +149,45 @@ def setup_profiler(log_dir: str):
 
     # Enable compilation logging
     jax.config.update("jax_log_compiles", True)
+    
+    # Enable memory profiling
+    jax.config.update("jax_enable_memories", True)
+    jax.config.update("jax_dump_leaks_on_exit", True)
+    
+    # Log device memory usage
+    print("\n=== Initial Device Memory Info ===")
+    for device in jax.devices():
+        stats = device.memory_stats()
+        if stats:
+            print(f"Device {device}: {stats}")
+    print("=" * 50 + "\n")
 
     return profile_dir
 
+
+def log_memory_usage(label: str):
+    """Log current GPU memory usage."""
+    for i, device in enumerate(jax.devices()):
+        stats = device.memory_stats()
+        if stats:
+            used_gb = stats['bytes_in_use'] / (1024**3)
+            limit_gb = stats.get('bytes_limit', 0) / (1024**3)
+            print(f"[{label}] GPU {i}: {used_gb:.2f}GB / {limit_gb:.2f}GB used")
 
 def profile_step(step: int, profile_dir: str, func, *args, **kwargs):
     """Profile a training step if within profiling range."""
     if step < 5:  # Profile first 5 steps to catch JIT compilations
         trace_path = os.path.join(profile_dir, f"step_{step}")
+        
+        # Log memory before
+        log_memory_usage(f"Before {func.__name__} step {step}")
+        
         with jax.profiler.trace(trace_path):
             result = func(*args, **kwargs)
+            
+        # Log memory after
+        log_memory_usage(f"After {func.__name__} step {step}")
+        
         print(f"Profiled step {step} -> {trace_path}")
     else:
         result = func(*args, **kwargs)
