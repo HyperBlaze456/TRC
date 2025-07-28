@@ -147,13 +147,6 @@ def setup_profiler(log_dir: str):
     profile_dir = os.path.join(log_dir, "profiles")
     os.makedirs(profile_dir, exist_ok=True)
 
-    # Enable compilation logging
-    jax.config.update("jax_log_compiles", True)
-    
-    # Enable memory profiling
-    jax.config.update("jax_enable_memories", True)
-    jax.config.update("jax_dump_leaks_on_exit", True)
-    
     # Log device memory usage
     print("\n=== Initial Device Memory Info ===")
     for device in jax.devices():

@@ -6,6 +6,7 @@ import sys
 # Set XLA flags to reduce memory usage for convolution algorithms
 os.environ["XLA_FLAGS"] = "--xla_gpu_strict_conv_algorithm_picker=false --xla_gpu_autotune_level=0"
 os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "false"
+os.environ["TF_GPU_ALLOCATOR"] = "cuda_malloc_async"
 
 # Set JAX traceback filtering off for detailed error traces
 os.environ["JAX_TRACEBACK_FILTERING"] = "off"
