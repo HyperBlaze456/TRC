@@ -1,5 +1,4 @@
 from flax import nnx
-from tokenizer.utils.norm import WeightNorm
 import jax
 
 
