@@ -9,6 +9,9 @@ large streaming datasets like Emilia (4TB).
 import os
 import sys
 
+# Set JAX traceback filtering off for detailed error traces
+os.environ["JAX_TRACEBACK_FILTERING"] = "off"
+
 from dotenv import load_dotenv
 from huggingface_hub import login
 
