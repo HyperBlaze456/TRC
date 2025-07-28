@@ -299,14 +299,13 @@ def train_discriminator_step(
     # Get real audio
     real_audio = audio
 
-    # Generate fake audio - now unpacking 8 values
+    # Reconstruction from fixed generator
     fake_audio, _, _, _, _, _, _, _ = generator(
         real_audio,
         encoder_causal_mask
     )
-    fake_audio = jax.lax.stop_gradient(fake_audio)  # Stops gradient flow
+    fake_audio = jax.lax.stop_gradient(fake_audio)
 
-    # === Multi-Scale Discriminator ===
     def msd_loss_fn(msd):
         msd_real, _ = msd(real_audio, training=True)
         msd_fake, _ = msd(fake_audio, training=True)
@@ -317,7 +316,6 @@ def train_discriminator_step(
     (msd_loss, msd_metrics), msd_grads = grad_fn(msd)
     msd_optimizer.update(msd_grads)
 
-    # === Multi-Period Discriminator ===
     def mpd_loss_fn(mpd):
         mpd_real, _ = mpd(real_audio)
         mpd_fake, _ = mpd(fake_audio)
@@ -328,7 +326,6 @@ def train_discriminator_step(
     (mpd_loss, mpd_metrics), mpd_grads = grad_fn(mpd)
     mpd_optimizer.update(mpd_grads)
 
-    # === STFT Discriminator ===
     def stftd_loss_fn(stftd):
         stftd_real, _ = stftd(real_audio, training=True)
         stftd_fake, _ = stftd(fake_audio, training=True)
@@ -413,8 +410,6 @@ def train_generator_step(
         disc_features_real = msd_feat_real + mpd_feat_real + stftd_feat_real
         disc_features_fake = msd_feat_fake + mpd_feat_fake + stftd_feat_fake
 
-        # Masks are already passed as arguments
-
         # Compute generator losses
         gen_loss, gen_metrics = gen_loss_fn(
             pred_audio=reconstructed,
@@ -475,7 +470,6 @@ def train_generator_step(
 # ============================================================================
 
 def save_checkpoint(state: TrainingState, step: int, checkpoint_dir: str):
-    """Save training checkpoint."""
 
     checkpoint_path = os.path.join(checkpoint_dir, f"step_{step}")
     os.makedirs(checkpoint_path, exist_ok=True)
@@ -559,18 +553,16 @@ def train(config: TrainingConfig):
     profile_dir = setup_profiler(config.log_dir)
     setup_logging(config)
 
-    # Create checkpoint directory
     os.makedirs(config.checkpoint_dir, exist_ok=True)
 
     # Training loop
     start_time = time.time()
     step = 0
-    while True:  # Run indefinitely
-        # Load and prepare batch
+    while True:  # Run forever(later on fix this to epoch based)
         batch = next(data_iter)
         batch = prepare_batch(batch)
 
-        # Extract arrays from batch
+        # get all jax arrays
         audio = batch["audio"]
         encoder_causal_mask = batch["encoder_causal_mask"]
         padding_mask = batch.get("padding_mask_2d", batch["padding_mask"][:, 0, 0, :])
@@ -596,7 +588,7 @@ def train(config: TrainingConfig):
                 config.loss_type
             )
 
-        # Update discriminator models
+        # Update discriminator
         state.msd = new_msd
         state.mpd = new_mpd
         state.stftd = new_stftd
