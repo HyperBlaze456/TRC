@@ -1,6 +1,7 @@
-import jax
+
 from flax import nnx
-from typing import Optional
+import jax
+
 from .embeddings import RotaryPositionalEmbedding
 
 
@@ -10,8 +11,8 @@ class MultiHeadAttentionWithBias(nnx.Module):
         num_heads: int,
         in_features: int,
         rngs: nnx.Rngs,
-        qkv_features: Optional[int] = None,
-        out_features: Optional[int] = None,
+        qkv_features: int | None = None,
+        out_features: int | None = None,
         dropout_rate: float = 0.0,
         use_bias: bool = True,
     ):
@@ -50,11 +51,11 @@ class MultiHeadAttentionWithBias(nnx.Module):
     def __call__(
         self,
         query: jax.Array,
-        key: Optional[jax.Array] = None,
-        value: Optional[jax.Array] = None,
-        mask: Optional[jax.Array] = None,
-        q_bias: Optional[jax.Array] = None,
-        k_bias: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
+        value: jax.Array | None = None,
+        mask: jax.Array | None = None,
+        q_bias: jax.Array | None = None,
+        k_bias: jax.Array | None = None,
         deterministic: bool = False,
     ) -> jax.Array:
         if key is None:
@@ -120,8 +121,8 @@ class MultiHeadAttentionWithRoPE(nnx.Module):
         num_heads: int,
         in_features: int,
         rngs: nnx.Rngs,
-        qkv_features: Optional[int] = None,
-        out_features: Optional[int] = None,
+        qkv_features: int | None = None,
+        out_features: int | None = None,
         dropout_rate: float = 0.0,
         use_bias: bool = True,
         rope: RotaryPositionalEmbedding | None = None,
