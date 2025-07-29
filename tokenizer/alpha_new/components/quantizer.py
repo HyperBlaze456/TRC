@@ -11,18 +11,13 @@ class VectorQuantizer(nnx.Module):
         )
 
     def __call__(self, z):
-        # Allows batch, [N, D] or [B, N, D]?
-
-        diff_squared = jnp.square(z[:, :, None, :] - self.codebook[None, None, :, :])
-        l2_distance = jnp.sum(diff_squared, axis=-1)
-        jax.debug.print(str(l2_distance.shape))
-        codebook_indicies = jnp.argmin(l2_distance, axis=-1)
+        distances = self.get_distances(z)
+        codebook_indicies = jnp.argmin(distances, axis=-1)
 
         z_q = self.codebook[codebook_indicies]
-        jax.debug.print(str(z_q.shape))
 
         z_q = z + jax.lax.stop_gradient(z_q - z)
-        return z_q, codebook_indicies
+        return z_q, codebook_indicies, distances
 
     def get_distances(self, z):
         """Get L2 distances to all codebook entries.
@@ -58,7 +53,7 @@ class ResidualVQ(nnx.Module):
 
         for i, vq in enumerate(self.codebooks):
             # Quantize the current residual
-            z_q, indices = vq(residual)
+            z_q, indices, _ = vq(residual)
             all_indices.append(indices)
             all_quantized.append(z_q)
 
@@ -99,8 +94,7 @@ class BinarySphericalQuantizer(nnx.Module):
         """
         Args:
             input_dim: Dimension of input embeddings
-            spherical_dim: Dimension of the hypersphere (lower than input_dim)
-            rngs: Random number generators
+            spherical_dim: Dimension of the hypersphere (much smaller than input_dim. Vocab is 2 to the power of this)
             temperature: Temperature for quantization sharpness
             use_straight_through: Whether to use straight-through gradient estimator
         """
@@ -114,7 +108,7 @@ class BinarySphericalQuantizer(nnx.Module):
         self.sphere_restore = nnx.Linear(spherical_dim, input_dim, rngs=rngs)
 
     def _normalize_to_sphere(self, x: jax.Array) -> jax.Array:
-        """Normalize vectors to unit hypersphere."""
+        """Normalize vectors to unit hypersphere. Values would be then used with sign operation."""
         return x / (jnp.linalg.norm(x, axis=-1, keepdims=True) + 1e-8)
 
     def _binary_quantize(self, x: jax.Array):
@@ -126,11 +120,12 @@ class BinarySphericalQuantizer(nnx.Module):
         """
         # Convert to binary {-1, 1}
         if self.use_straight_through:
-            # Straight-through estimator: forward pass quantizes, backward pass flows through
             codes = (x > 0).astype(jnp.float32)
             quantized = 2 * codes - 1
-            # Stop gradient and add back for straight-through
-            quantized = jax.lax.stop_gradient(quantized - x) + x
+
+            quantized = (
+                jax.lax.stop_gradient(quantized - x) + x
+            )  # quantizer straight through
         else:
             # Soft quantization using tanh
             quantized = jnp.tanh(x / self.temperature)
@@ -148,13 +143,9 @@ class BinarySphericalQuantizer(nnx.Module):
             codes: Binary codes [B, T, spherical_dim]
             spherical_embeddings: Normalized spherical embeddings before quantization
         """
-        # Project to lower-dimensional space
         spherical = self.proj_sphere(x)
-
-        # Normalize to unit hypersphere
         spherical_normalized = self._normalize_to_sphere(spherical)
 
-        # Binary quantization
         _, codes = self._binary_quantize(spherical_normalized)
 
         return codes, spherical_normalized
@@ -186,17 +177,14 @@ class BinarySphericalQuantizer(nnx.Module):
             reconstructed: Reconstructed embeddings [B, T, D]
             codes: Binary codes [B, T, spherical_dim]
         """
-        # Project to sphere
         spherical = self.proj_sphere(x)
         spherical_normalized = self._normalize_to_sphere(spherical)
 
-        # Binary quantization
         quantized, codes = self._binary_quantize(spherical_normalized)
 
-        # Reconstruct
         reconstructed = self.sphere_restore(quantized)
 
-        # Straight-through estimator for the whole reconstruction
+        # reconstruction must have straigh-through.
         reconstructed = x + jax.lax.stop_gradient(reconstructed - x)
 
         return reconstructed, codes
@@ -241,7 +229,11 @@ class PhonemeBSQQuantizer(nnx.Module):
             use_straight_through=True,
         )
 
-    def __call__(self, x: jax.Array):
+    def __call__(
+        self, x: jax.Array
+    ) -> tuple[
+        jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array
+    ]:
         """Forward pass with two-stage quantization.
 
         Args:
@@ -256,25 +248,15 @@ class PhonemeBSQQuantizer(nnx.Module):
             bsq_quantized: BSQ output for commitment loss [B, T, D]
             vq_residual: Residual before BSQ for commitment loss [B, T, D]
         """
-        # Stage 1: VQ for phoneme classification with logits
-        # Compute L2 distances once
-        diff_squared = jnp.square(
-            x[:, :, None, :] - self.phoneme_vq.codebook[None, None, :, :]
-        )
-        l2_distance = jnp.sum(diff_squared, axis=-1)
+        # Stage 1: VQ for phoneme classification - now returns distances too
+        phoneme_quantized, phoneme_indices, distances = self.phoneme_vq(x)
 
-        # Get indices from distances
-        phoneme_indices = jnp.argmin(l2_distance, axis=-1)
-
-        # Get quantized vectors (without straight-through for intermediate output)
+        # Get the actual quantized vectors without straight-through for intermediate output
         vq_quantized = self.phoneme_vq.codebook[phoneme_indices]
-
-        # Apply straight-through for forward pass
-        phoneme_quantized = x + jax.lax.stop_gradient(vq_quantized - x)
 
         # Convert distances to log probabilities for CTC loss
         # Flip distances (negative) and apply log_softmax for normalization
-        phoneme_logits = jax.nn.log_softmax(-l2_distance, axis=-1)
+        phoneme_logits = jax.nn.log_softmax(-distances, axis=-1)
 
         # Calculate residual after phoneme quantization
         vq_residual = x - jax.lax.stop_gradient(vq_quantized)
@@ -305,16 +287,13 @@ class PhonemeBSQQuantizer(nnx.Module):
 
         Args:
             x: Input embeddings [B, T, D]
-            temperature: Temperature for softmax scaling
+            temperature: That same temperature we use in LLM.
 
         Returns:
             Phoneme logits [B, T, phoneme_codebook_size]
         """
-        # Get L2 distances to all phoneme codebook entries
         distances = self.phoneme_vq.get_distances(x)
 
-        # Convert distances to logits (negative distance so closer = higher logit)
-        # Apply temperature scaling for better gradients
         logits = -distances / temperature
 
         # Apply log_softmax for numerical stability in CTC loss
@@ -332,10 +311,9 @@ class PhonemeBSQQuantizer(nnx.Module):
             phoneme_indices: Phoneme codebook indices [B, T]
             acoustic_codes: Binary codes for acoustic features [B, T, spherical_dim]
         """
-        # Get phoneme codes
-        phoneme_quantized, phoneme_indices = self.phoneme_vq(x)
+        # Get phoneme codes - now unpacking all three return values
+        phoneme_quantized, phoneme_indices, _ = self.phoneme_vq(x)
 
-        # Get acoustic codes from residual
         residual = x - phoneme_quantized
         acoustic_codes, _ = self.acoustic_bsq.encode(residual)
 

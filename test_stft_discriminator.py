@@ -1,6 +1,8 @@
 from flax import nnx
 import jax
-from tokenizer.alpha.components.discriminators.stft_discriminator import STFTDiscriminator
+from tokenizer.alpha.components.discriminators.stft_discriminator import (
+    STFTDiscriminator,
+)
 
 key = jax.random.PRNGKey(42)
 model = STFTDiscriminator(rngs=nnx.Rngs(key))

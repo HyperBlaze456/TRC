@@ -1,13 +1,12 @@
-
 import jax
 import jax.numpy as jnp
 
 
 def create_padding_mask(
-        lengths: jax.Array,
-        max_length: int,
-        causal: bool = False,
-        dtype: jnp.dtype = jnp.bool_
+    lengths: jax.Array,
+    max_length: int,
+    causal: bool = False,
+    dtype: jnp.dtype = jnp.bool_,
 ) -> jax.Array:
     """Create attention mask for padded sequences with left-padding.
 
@@ -32,7 +31,9 @@ def create_padding_mask(
 
     if causal:
         # Create causal mask
-        causal_mask = jnp.tril(jnp.ones((max_length, max_length), dtype=dtype))  # [T, T]
+        causal_mask = jnp.tril(
+            jnp.ones((max_length, max_length), dtype=dtype)
+        )  # [T, T]
         # Combine with padding mask
         # Expand padding_mask for broadcasting: [B, 1, T]
         padding_mask_expanded = padding_mask[:, None, :]
@@ -49,22 +50,22 @@ def create_padding_mask(
 
 
 def create_encoder_masks(
-        lengths: jax.Array,
-        max_length: int,
-        downsample_factor: int,
-        dtype: jnp.dtype = jnp.bool_
+    lengths: jax.Array,
+    max_length: int,
+    downsample_factor: int,
+    dtype: jnp.dtype = jnp.bool_,
 ) -> tuple[jax.Array, jax.Array]:
     """Create memory-efficient encoder masks at downsampled resolution.
-    
+
     This function creates both non-causal and causal masks directly at the
     encoder resolution, avoiding the memory overhead of full-resolution causal masks.
-    
+
     Args:
         lengths: Array of actual sequence lengths [B]
         max_length: Maximum sequence length in the batch (at audio resolution)
         downsample_factor: How much the encoder downsamples (e.g., 480 for 24kHz->50Hz)
         dtype: Data type for the mask
-        
+
     Returns:
         encoder_mask: Non-causal padding mask at encoder resolution [B, T']
         encoder_causal_mask: Causal mask at encoder resolution [B, T', T']
@@ -87,7 +88,9 @@ def create_encoder_masks(
     encoder_mask = padding_mask  # [B, T']
 
     # Causal mask at encoder resolution (much smaller than audio resolution)
-    causal_mask = jnp.tril(jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype))  # [T', T']
+    causal_mask = jnp.tril(
+        jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype)
+    )  # [T', T']
 
     # Combine with padding mask
     padding_mask_expanded = padding_mask[:, None, :]  # [B, 1, T']
@@ -96,10 +99,7 @@ def create_encoder_masks(
     return encoder_mask.astype(dtype), encoder_causal_mask.astype(dtype)
 
 
-def downsample_mask(
-        mask: jax.Array | None,
-        downsample_factor: int
-) -> jax.Array | None:
+def downsample_mask(mask: jax.Array | None, downsample_factor: int) -> jax.Array | None:
     """Downsample attention mask to match encoder output time dimension.
 
     Args:
@@ -154,9 +154,7 @@ def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
 
 
 def pad_sequences_left(
-        sequences: list[jax.Array],
-        max_length: int = None,
-        pad_value: float = 0.0
+    sequences: list[jax.Array], max_length: int = None, pad_value: float = 0.0
 ) -> tuple[jax.Array, jax.Array]:
     """Pad sequences with left-padding to create a batch.
 
@@ -191,9 +189,7 @@ def pad_sequences_left(
 
 
 def combine_masks(
-        mask1: jax.Array,
-        mask2: jax.Array,
-        operation: str = "and"
+    mask1: jax.Array, mask2: jax.Array, operation: str = "and"
 ) -> jax.Array:
     """Combine two masks using specified bitwise operation.
     Will support more, probably.

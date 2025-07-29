@@ -26,19 +26,27 @@ class MultiHeadAttentionWithBias(nnx.Module):
                 f"qkv_features ({self.qkv_features}) must be divisible by "
                 f"num_heads ({self.num_heads})"
             )
-        
+
         self.head_dim = self.qkv_features // self.num_heads
-        
-        self.q_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.k_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.v_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.out_proj = nnx.Linear(self.qkv_features, self.out_features, use_bias=use_bias, rngs=rngs)
-        
+
+        self.q_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.k_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.v_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.out_proj = nnx.Linear(
+            self.qkv_features, self.out_features, use_bias=use_bias, rngs=rngs
+        )
+
         if dropout_rate > 0.0:
             self.dropout = nnx.Dropout(dropout_rate, rngs=rngs)
         else:
             self.dropout = None
-        
+
     def __call__(
         self,
         query: jax.Array,
@@ -47,23 +55,23 @@ class MultiHeadAttentionWithBias(nnx.Module):
         mask: Optional[jax.Array] = None,
         q_bias: Optional[jax.Array] = None,
         k_bias: Optional[jax.Array] = None,
-        deterministic: bool = False
+        deterministic: bool = False,
     ) -> jax.Array:
         if key is None:
             key = query
         if value is None:
             value = query
-            
+
         batch_size, seq_len = query.shape[:2]
-        
+
         q = self.q_proj(query)
         k = self.k_proj(key)
         v = self.v_proj(value)
-        
+
         q = q.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         k = k.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
         v = v.reshape(batch_size, seq_len, self.num_heads, self.head_dim)
-        
+
         # Handle mask broadcasting for multi-head attention
         if mask is not None:
             # Ensure mask has the right shape [batch, 1, seq_len, seq_len] for broadcasting
@@ -71,7 +79,7 @@ class MultiHeadAttentionWithBias(nnx.Module):
                 mask = mask[:, None, :, :]  # Add head dimension
             elif mask.ndim == 2:  # [seq_len, seq_len]
                 mask = mask[None, None, :, :]  # Add batch and head dimensions
-        
+
         attention_bias = None
         if q_bias is not None or k_bias is not None:
             if q_bias is not None and k_bias is not None:
@@ -80,27 +88,29 @@ class MultiHeadAttentionWithBias(nnx.Module):
                 attention_bias = q_bias
             else:
                 attention_bias = k_bias
-        
+
         # Get dropout key if needed
         dropout_rng = None
         if self.dropout_rate > 0.0 and not deterministic:
             dropout_rng = self.rngs.dropout()
-        
+
         attn_output = nnx.dot_product_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             mask=mask,
             bias=attention_bias,
             dropout_rate=self.dropout_rate if not deterministic else 0.0,
             dropout_rng=dropout_rng,
         )
-        
+
         attn_output = attn_output.reshape(batch_size, seq_len, self.qkv_features)
-        
+
         output = self.out_proj(attn_output)
-        
+
         if self.dropout is not None and not deterministic:
             output = self.dropout(output)
-            
+
         return output
 
 
@@ -123,41 +133,49 @@ class MultiHeadAttentionWithRoPE(nnx.Module):
         self.dropout_rate = dropout_rate
         self.rngs = rngs
         self.rope = rope
-        
+
         if self.qkv_features % self.num_heads != 0:
             raise ValueError(
                 f"qkv_features ({self.qkv_features}) must be divisible by "
                 f"num_heads ({self.num_heads})"
             )
-        
+
         self.head_dim = self.qkv_features // self.num_heads
-        
-        self.q_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.k_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.v_proj = nnx.Linear(in_features, self.qkv_features, use_bias=use_bias, rngs=rngs)
-        self.out_proj = nnx.Linear(self.qkv_features, self.out_features, use_bias=use_bias, rngs=rngs)
-        
+
+        self.q_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.k_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.v_proj = nnx.Linear(
+            in_features, self.qkv_features, use_bias=use_bias, rngs=rngs
+        )
+        self.out_proj = nnx.Linear(
+            self.qkv_features, self.out_features, use_bias=use_bias, rngs=rngs
+        )
+
         if dropout_rate > 0.0:
             self.dropout = nnx.Dropout(dropout_rate, rngs=rngs)
         else:
             self.dropout = None
-        
+
     def __call__(
         self,
         query: jax.Array,
-        key: Optional[jax.Array] = None,
-        value: Optional[jax.Array] = None,
-        mask: Optional[jax.Array] = None,
-        rope_cos_sin: Optional[tuple] = None,
-        deterministic: bool = False
+        key: jax.Array | None = None,
+        value: jax.Array | None = None,
+        mask: jax.Array | None = None,
+        rope_cos_sin: tuple | None = None,
+        deterministic: bool = False,
     ) -> jax.Array:
         if key is None:
             key = query
         if value is None:
             value = query
-            
+
         batch_size, seq_len = query.shape[:2]
-        
+
         q = self.q_proj(query)
         k = self.k_proj(key)
         v = self.v_proj(value)
@@ -172,7 +190,7 @@ class MultiHeadAttentionWithRoPE(nnx.Module):
             # Apply rotary embeddings using the existing method
             q = self.rope.apply_rotary_pos_emb(q, cos, sin)
             k = self.rope.apply_rotary_pos_emb(k, cos, sin)
-        
+
         # Handle mask broadcasting for multi-head attention
         if mask is not None:
             # Ensure mask has the right shape [batch, 1, seq_len, seq_len] for broadcasting
@@ -180,24 +198,26 @@ class MultiHeadAttentionWithRoPE(nnx.Module):
                 mask = mask[:, None, :, :]  # Add head dimension
             elif mask.ndim == 2:  # [seq_len, seq_len]
                 mask = mask[None, None, :, :]  # Add batch and head dimensions
-        
+
         # Get dropout key if needed
         dropout_rng = None
         if self.dropout_rate > 0.0 and not deterministic:
             dropout_rng = self.rngs.dropout()
-        
+
         attn_output = nnx.dot_product_attention(
-            q, k, v,
+            q,
+            k,
+            v,
             mask=mask,
             dropout_rate=self.dropout_rate if not deterministic else 0.0,
             dropout_rng=dropout_rng,
         )
-        
+
         attn_output = attn_output.reshape(batch_size, seq_len, self.qkv_features)
-        
+
         output = self.out_proj(attn_output)
-        
+
         if self.dropout is not None and not deterministic:
             output = self.dropout(output)
-            
+
         return output

@@ -46,7 +46,7 @@ from tokenizer.alpha.losses.phoneme_loss import phoneme_ctc_loss
 # Import our modules
 from tokenizer.alpha.model import SpeechTokenizer
 from tokenizer.utils.data.phoneme_utils import PHONEME_VOCAB_SIZE
-from tokenizer.utils.data.simple_loader import AudioConfig, create_emilia_ds
+from tokenizer.utils.data.loader import AudioConfig, create_emilia_ds
 
 # Setup environment
 load_dotenv()
@@ -70,9 +70,11 @@ else:
 # Configuration
 # ============================================================================
 
+
 @dataclass
 class TrainingConfig:
     """Configuration for training."""
+
     # Model architecture
     hidden_size: int = 512
     encoder_depth: int = 4
@@ -101,18 +103,20 @@ class TrainingConfig:
 
     # Loss settings
     loss_type: str = "lsgan"  # or "hinge"
-    loss_weights: dict = field(default_factory=lambda: {
-        "l1": 1.0,
-        "l2": 1.0,
-        "mel": 15.0,
-        "stft_sc": 2.0,
-        "stft_lm": 1.0,
-        "vq_commit": 0.1,
-        "bsq_commit": 1.0,
-        "adversarial": 1.0,
-        "feature_match": 10.0,
-        "ctc": 10.0,
-    })
+    loss_weights: dict = field(
+        default_factory=lambda: {
+            "l1": 1.0,
+            "l2": 1.0,
+            "mel": 15.0,
+            "stft_sc": 2.0,
+            "stft_lm": 1.0,
+            "vq_commit": 0.1,
+            "bsq_commit": 1.0,
+            "adversarial": 1.0,
+            "feature_match": 10.0,
+            "ctc": 10.0,
+        }
+    )
 
     # W&B settings
     use_wandb: bool = True
@@ -124,9 +128,11 @@ class TrainingConfig:
 # Training State
 # ============================================================================
 
+
 @dataclass
 class TrainingState:
     """Training state containing models and optimizers."""
+
     generator: SpeechTokenizer
     msd: MultiScaleDiscriminator
     mpd: MultiPeriodDiscriminator
@@ -142,6 +148,7 @@ class TrainingState:
 # JAX Profiler Setup
 # ============================================================================
 
+
 def setup_profiler(log_dir: str):
     """Setup JAX profiler for performance monitoring."""
     profile_dir = os.path.join(log_dir, "profiles")
@@ -149,11 +156,11 @@ def setup_profiler(log_dir: str):
 
     # Enable compilation logging
     jax.config.update("jax_log_compiles", True)
-    
+
     # Enable memory profiling
     jax.config.update("jax_enable_memories", True)
     jax.config.update("jax_dump_leaks_on_exit", True)
-    
+
     # Log device memory usage
     print("\n=== Initial Device Memory Info ===")
     for device in jax.devices():
@@ -170,24 +177,25 @@ def log_memory_usage(label: str):
     for i, device in enumerate(jax.devices()):
         stats = device.memory_stats()
         if stats:
-            used_gb = stats['bytes_in_use'] / (1024**3)
-            limit_gb = stats.get('bytes_limit', 0) / (1024**3)
+            used_gb = stats["bytes_in_use"] / (1024**3)
+            limit_gb = stats.get("bytes_limit", 0) / (1024**3)
             print(f"[{label}] GPU {i}: {used_gb:.2f}GB / {limit_gb:.2f}GB used")
+
 
 def profile_step(step: int, profile_dir: str, func, *args, **kwargs):
     """Profile a training step if within profiling range."""
     if step < 5:  # Profile first 5 steps to catch JIT compilations
         trace_path = os.path.join(profile_dir, f"step_{step}")
-        
+
         # Log memory before
         log_memory_usage(f"Before {func.__name__} step {step}")
-        
+
         with jax.profiler.trace(trace_path):
             result = func(*args, **kwargs)
-            
+
         # Log memory after
         log_memory_usage(f"After {func.__name__} step {step}")
-        
+
         print(f"Profiled step {step} -> {trace_path}")
     else:
         result = func(*args, **kwargs)
@@ -198,7 +206,10 @@ def profile_step(step: int, profile_dir: str, func, *args, **kwargs):
 # Model Creation
 # ============================================================================
 
-def create_models_and_optimizers(config: TrainingConfig, rngs: nnx.Rngs) -> TrainingState:
+
+def create_models_and_optimizers(
+    config: TrainingConfig, rngs: nnx.Rngs
+) -> TrainingState:
     """Create models and optimizers."""
 
     # Create generator (SpeechTokenizer)
@@ -221,41 +232,29 @@ def create_models_and_optimizers(config: TrainingConfig, rngs: nnx.Rngs) -> Trai
     gen_optimizer = nnx.Optimizer(
         generator,
         optax.adamw(
-            learning_rate=config.generator_lr,
-            b1=0.5,
-            b2=0.9,
-            weight_decay=1e-4
-        )
+            learning_rate=config.generator_lr, b1=0.5, b2=0.9, weight_decay=1e-4
+        ),
     )
 
     msd_optimizer = nnx.Optimizer(
         msd,
         optax.adamw(
-            learning_rate=config.discriminator_lr,
-            b1=0.5,
-            b2=0.9,
-            weight_decay=1e-4
-        )
+            learning_rate=config.discriminator_lr, b1=0.5, b2=0.9, weight_decay=1e-4
+        ),
     )
 
     mpd_optimizer = nnx.Optimizer(
         mpd,
         optax.adamw(
-            learning_rate=config.discriminator_lr,
-            b1=0.5,
-            b2=0.9,
-            weight_decay=1e-4
-        )
+            learning_rate=config.discriminator_lr, b1=0.5, b2=0.9, weight_decay=1e-4
+        ),
     )
 
     stftd_optimizer = nnx.Optimizer(
         stftd,
         optax.adamw(
-            learning_rate=config.discriminator_lr,
-            b1=0.5,
-            b2=0.9,
-            weight_decay=1e-4
-        )
+            learning_rate=config.discriminator_lr, b1=0.5, b2=0.9, weight_decay=1e-4
+        ),
     )
 
     return TrainingState(
@@ -274,13 +273,16 @@ def create_models_and_optimizers(config: TrainingConfig, rngs: nnx.Rngs) -> Trai
 # Data Loading
 # ============================================================================
 
+
 def create_data_iterator(config: TrainingConfig):
     """Create streaming iterator for massive dataset."""
-    dataset = create_emilia_ds(AudioConfig(
-        streaming=True,  # Critical for 4TB dataset
-        batch_size=config.batch_size,
-        sample_rate=24000,
-    ))
+    dataset = create_emilia_ds(
+        AudioConfig(
+            streaming=True,  # Critical for 4TB dataset
+            batch_size=config.batch_size,
+            sample_rate=24000,
+        )
+    )
 
     # Create infinite iterator
     return iter(dataset)
@@ -299,24 +301,33 @@ def prepare_batch(batch: dict) -> dict:
 # Training Steps (JIT-compiled)
 # ============================================================================
 
+
 @partial(nnx.jit, static_argnums=(10,))
 def train_discriminator_step(
-        # Individual modules
-        generator: SpeechTokenizer,
-        msd: MultiScaleDiscriminator,
-        mpd: MultiPeriodDiscriminator,
-        stftd: STFTDiscriminator,
-        msd_optimizer: nnx.Optimizer,
-        mpd_optimizer: nnx.Optimizer,
-        stftd_optimizer: nnx.Optimizer,
-        # Batch arrays
-        audio: jax.Array,
-        encoder_causal_mask: jax.Array,
-        padding_mask: jax.Array,
-        # Mentioned before; This might be consumed by discriminator modules later for more accuracy
-        # Static config
-        loss_type: str = "lsgan"
-) -> tuple[dict, tuple[SpeechTokenizer, MultiScaleDiscriminator, MultiPeriodDiscriminator, STFTDiscriminator]]:
+    # Individual modules
+    generator: SpeechTokenizer,
+    msd: MultiScaleDiscriminator,
+    mpd: MultiPeriodDiscriminator,
+    stftd: STFTDiscriminator,
+    msd_optimizer: nnx.Optimizer,
+    mpd_optimizer: nnx.Optimizer,
+    stftd_optimizer: nnx.Optimizer,
+    # Batch arrays
+    audio: jax.Array,
+    encoder_causal_mask: jax.Array,
+    padding_mask: jax.Array,
+    # Mentioned before; This might be consumed by discriminator modules later for more accuracy
+    # Static config
+    loss_type: str = "lsgan",
+) -> tuple[
+    dict,
+    tuple[
+        SpeechTokenizer,
+        MultiScaleDiscriminator,
+        MultiPeriodDiscriminator,
+        STFTDiscriminator,
+    ],
+]:
     """Train discriminators for one step."""
 
     # Select loss function based on type
@@ -329,10 +340,7 @@ def train_discriminator_step(
     real_audio = audio
 
     # Reconstruction from fixed generator
-    fake_audio, _, _, _, _, _, _, _ = generator(
-        real_audio,
-        encoder_causal_mask
-    )
+    fake_audio, _, _, _, _, _, _, _ = generator(real_audio, encoder_causal_mask)
     fake_audio = jax.lax.stop_gradient(fake_audio)
 
     def msd_loss_fn(msd):
@@ -378,36 +386,38 @@ def train_discriminator_step(
 
 # Arguments 0-10: modules and arrays (not static)
 # Arguments 11-24: static parameters
-@partial(nnx.jit, static_argnums=(11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24))
+@partial(
+    nnx.jit, static_argnums=(11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24)
+)
 def train_generator_step(
-        # Individual modules
-        generator: SpeechTokenizer,
-        msd: MultiScaleDiscriminator,
-        mpd: MultiPeriodDiscriminator,
-        stftd: STFTDiscriminator,
-        gen_optimizer: nnx.Optimizer,
-        # Batch arrays
-        audio: jax.Array,
-        encoder_causal_mask: jax.Array,
-        padding_mask: jax.Array,
-        encoder_mask: jax.Array,
-        phonemes: jax.Array,
-        phoneme_mask: jax.Array,
-        # Loss weights (static)
-        loss_type: str,
-        w_l1: float,
-        w_l2: float,
-        w_mel: float,
-        w_stft_sc: float,
-        w_stft_lm: float,
-        w_vq_commit: float,
-        w_bsq_commit: float,
-        w_adversarial: float,
-        w_feature_match: float,
-        w_ctc: float,
-        stft_fft_sizes: tuple = (2048, 1024, 512, 256, 128),
-        stft_hop_sizes: tuple = (512, 256, 128, 64, 32),
-        stft_win_sizes: tuple = (2048, 1024, 512, 256, 128)
+    # Individual modules
+    generator: SpeechTokenizer,
+    msd: MultiScaleDiscriminator,
+    mpd: MultiPeriodDiscriminator,
+    stftd: STFTDiscriminator,
+    gen_optimizer: nnx.Optimizer,
+    # Batch arrays
+    audio: jax.Array,
+    encoder_causal_mask: jax.Array,
+    padding_mask: jax.Array,
+    encoder_mask: jax.Array,
+    phonemes: jax.Array,
+    phoneme_mask: jax.Array,
+    # Loss weights (static)
+    loss_type: str,
+    w_l1: float,
+    w_l2: float,
+    w_mel: float,
+    w_stft_sc: float,
+    w_stft_lm: float,
+    w_vq_commit: float,
+    w_bsq_commit: float,
+    w_adversarial: float,
+    w_feature_match: float,
+    w_ctc: float,
+    stft_fft_sizes: tuple = (2048, 1024, 512, 256, 128),
+    stft_hop_sizes: tuple = (512, 256, 128, 64, 32),
+    stft_win_sizes: tuple = (2048, 1024, 512, 256, 128),
 ) -> tuple[dict, SpeechTokenizer]:
     """Train generator for one step."""
 
@@ -419,10 +429,16 @@ def train_generator_step(
 
     def generator_loss(generator):
         # Forward pass - now returns all intermediate values needed for losses
-        reconstructed, phoneme_indices, acoustic_codes, encoder_output, phoneme_logits, vq_quantized, bsq_quantized, vq_residual = generator(
-            audio,
-            encoder_causal_mask
-        )
+        (
+            reconstructed,
+            phoneme_indices,
+            acoustic_codes,
+            encoder_output,
+            phoneme_logits,
+            vq_quantized,
+            bsq_quantized,
+            vq_residual,
+        ) = generator(audio, encoder_causal_mask)
 
         # Get discriminator outputs (no gradients for discriminators)
         msd_fake, msd_feat_fake = msd(reconstructed, training=False)
@@ -463,7 +479,7 @@ def train_generator_step(
             w_feature_match=w_feature_match,
             stft_fft_sizes=stft_fft_sizes,
             stft_hop_sizes=stft_hop_sizes,
-            stft_win_sizes=stft_win_sizes
+            stft_win_sizes=stft_win_sizes,
         )
 
         # Compute CTC loss
@@ -471,17 +487,19 @@ def train_generator_step(
             phoneme_logits=phoneme_logits,
             encoder_mask=encoder_mask,
             phoneme_indices=phonemes,
-            phoneme_mask=phoneme_mask
+            phoneme_mask=phoneme_mask,
         )
 
         # Total loss
         total_loss = gen_loss + w_ctc * ctc_loss
 
         # Update metrics
-        gen_metrics.update({
-            "gen/ctc_loss": ctc_loss,
-            **{f"gen/ctc_{k}": v for k, v in ctc_metrics.items()},
-        })
+        gen_metrics.update(
+            {
+                "gen/ctc_loss": ctc_loss,
+                **{f"gen/ctc_{k}": v for k, v in ctc_metrics.items()},
+            }
+        )
         gen_metrics["gen/total"] = total_loss
 
         return total_loss, gen_metrics
@@ -498,8 +516,8 @@ def train_generator_step(
 # Checkpointing
 # ============================================================================
 
-def save_checkpoint(state: TrainingState, step: int, checkpoint_dir: str):
 
+def save_checkpoint(state: TrainingState, step: int, checkpoint_dir: str):
     checkpoint_path = os.path.join(checkpoint_dir, f"step_{step}")
     os.makedirs(checkpoint_path, exist_ok=True)
 
@@ -519,7 +537,7 @@ def save_checkpoint(state: TrainingState, step: int, checkpoint_dir: str):
             "mpd_optimizer": state.mpd_optimizer,
             "stftd_optimizer": state.stftd_optimizer,
             "step": step,
-        }
+        },
     )
 
     print(f"Saved checkpoint at step {step}")
@@ -529,13 +547,14 @@ def save_checkpoint(state: TrainingState, step: int, checkpoint_dir: str):
 # Logging
 # ============================================================================
 
+
 def setup_logging(config: TrainingConfig):
     """Setup logging (W&B or console)."""
     if config.use_wandb:
         wandb.init(
             project=config.wandb_project,
             name=config.wandb_name or f"run_{int(time.time())}",
-            config=config.__dict__
+            config=config.__dict__,
         )
 
     os.makedirs(config.log_dir, exist_ok=True)
@@ -568,6 +587,7 @@ def log_metrics(step: int, metrics: dict, config: TrainingConfig):
 # ============================================================================
 # Main Training Loop
 # ============================================================================
+
 
 def train(config: TrainingConfig):
     """Main training function."""
@@ -602,19 +622,34 @@ def train(config: TrainingConfig):
         # Train discriminators
         if step < config.profile_first_n_steps:
             disc_metrics, (_, new_msd, new_mpd, new_stftd) = profile_step(
-                step, profile_dir,
+                step,
+                profile_dir,
                 train_discriminator_step,
-                state.generator, state.msd, state.mpd, state.stftd,
-                state.msd_optimizer, state.mpd_optimizer, state.stftd_optimizer,
-                audio, encoder_causal_mask, padding_mask,
-                config.loss_type
+                state.generator,
+                state.msd,
+                state.mpd,
+                state.stftd,
+                state.msd_optimizer,
+                state.mpd_optimizer,
+                state.stftd_optimizer,
+                audio,
+                encoder_causal_mask,
+                padding_mask,
+                config.loss_type,
             )
         else:
             disc_metrics, (_, new_msd, new_mpd, new_stftd) = train_discriminator_step(
-                state.generator, state.msd, state.mpd, state.stftd,
-                state.msd_optimizer, state.mpd_optimizer, state.stftd_optimizer,
-                audio, encoder_causal_mask, padding_mask,
-                config.loss_type
+                state.generator,
+                state.msd,
+                state.mpd,
+                state.stftd,
+                state.msd_optimizer,
+                state.mpd_optimizer,
+                state.stftd_optimizer,
+                audio,
+                encoder_causal_mask,
+                padding_mask,
+                config.loss_type,
             )
 
         # Update discriminator
@@ -625,12 +660,20 @@ def train(config: TrainingConfig):
         # Train generator
         if step < config.profile_first_n_steps:
             gen_metrics, new_generator = profile_step(
-                step, profile_dir,
+                step,
+                profile_dir,
                 train_generator_step,
-                state.generator, state.msd, state.mpd, state.stftd,
+                state.generator,
+                state.msd,
+                state.mpd,
+                state.stftd,
                 state.gen_optimizer,
-                audio, encoder_causal_mask, padding_mask, encoder_mask,
-                phonemes, phoneme_mask,
+                audio,
+                encoder_causal_mask,
+                padding_mask,
+                encoder_mask,
+                phonemes,
+                phoneme_mask,
                 config.loss_type,
                 config.loss_weights["l1"],
                 config.loss_weights["l2"],
@@ -641,14 +684,21 @@ def train(config: TrainingConfig):
                 config.loss_weights["bsq_commit"],
                 config.loss_weights["adversarial"],
                 config.loss_weights["feature_match"],
-                config.loss_weights["ctc"]
+                config.loss_weights["ctc"],
             )
         else:
             gen_metrics, new_generator = train_generator_step(
-                state.generator, state.msd, state.mpd, state.stftd,
+                state.generator,
+                state.msd,
+                state.mpd,
+                state.stftd,
                 state.gen_optimizer,
-                audio, encoder_causal_mask, padding_mask, encoder_mask,
-                phonemes, phoneme_mask,
+                audio,
+                encoder_causal_mask,
+                padding_mask,
+                encoder_mask,
+                phonemes,
+                phoneme_mask,
                 config.loss_type,
                 config.loss_weights["l1"],
                 config.loss_weights["l2"],
@@ -659,7 +709,7 @@ def train(config: TrainingConfig):
                 config.loss_weights["bsq_commit"],
                 config.loss_weights["adversarial"],
                 config.loss_weights["feature_match"],
-                config.loss_weights["ctc"]
+                config.loss_weights["ctc"],
             )
 
         # Update generator model

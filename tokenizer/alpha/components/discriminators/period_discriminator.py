@@ -6,24 +6,68 @@ import jax.numpy as jnp
 class PeriodDiscriminator(nnx.Module):
     """Single period discriminator sub-network."""
 
-    def __init__(self, period: int, kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
+    def __init__(
+        self, period: int, kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None
+    ):
         self.period = period
 
         self.convs = [
-            nnx.Conv(1, 32, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
-            nnx.Conv(32, 128, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
-            nnx.Conv(128, 512, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
-            nnx.Conv(512, 1024, kernel_size=(kernel_size, 1), strides=(stride, 1), padding=((2, 2), (0, 0)), rngs=rngs),
-            nnx.Conv(1024, 1024, kernel_size=(kernel_size, 1), strides=(1, 1), padding=((2, 2), (0, 0)), rngs=rngs),
+            nnx.Conv(
+                1,
+                32,
+                kernel_size=(kernel_size, 1),
+                strides=(stride, 1),
+                padding=((2, 2), (0, 0)),
+                rngs=rngs,
+            ),
+            nnx.Conv(
+                32,
+                128,
+                kernel_size=(kernel_size, 1),
+                strides=(stride, 1),
+                padding=((2, 2), (0, 0)),
+                rngs=rngs,
+            ),
+            nnx.Conv(
+                128,
+                512,
+                kernel_size=(kernel_size, 1),
+                strides=(stride, 1),
+                padding=((2, 2), (0, 0)),
+                rngs=rngs,
+            ),
+            nnx.Conv(
+                512,
+                1024,
+                kernel_size=(kernel_size, 1),
+                strides=(stride, 1),
+                padding=((2, 2), (0, 0)),
+                rngs=rngs,
+            ),
+            nnx.Conv(
+                1024,
+                1024,
+                kernel_size=(kernel_size, 1),
+                strides=(1, 1),
+                padding=((2, 2), (0, 0)),
+                rngs=rngs,
+            ),
         ]
 
-        self.conv_post = nnx.Conv(1024, 1, kernel_size=(3, 1), strides=(1, 1), padding=((1, 1), (0, 0)), rngs=rngs) # This can be linear.
+        self.conv_post = nnx.Conv(
+            1024,
+            1,
+            kernel_size=(3, 1),
+            strides=(1, 1),
+            padding=((1, 1), (0, 0)),
+            rngs=rngs,
+        )  # This can be linear.
 
     def __call__(self, x: jax.Array) -> tuple[jax.Array, list[jax.Array]]:
         """
         Args:
             x: Input tensor of shape [B, T]
-            
+
         Returns:
             output: Discriminator output of shape [B, T', 1]
             feature_maps: List of intermediate feature maps for feature matching loss
@@ -62,7 +106,13 @@ class PeriodDiscriminator(nnx.Module):
 class MultiPeriodDiscriminator(nnx.Module):
     """Multi-Period Discriminator (MPD) from HiFi-GAN."""
 
-    def __init__(self, periods: list[int] = [2, 3, 5, 7, 11], kernel_size: int = 5, stride: int = 3, rngs: nnx.Rngs = None):
+    def __init__(
+        self,
+        periods: list[int] = [2, 3, 5, 7, 11],
+        kernel_size: int = 5,
+        stride: int = 3,
+        rngs: nnx.Rngs = None,
+    ):
         """
         Args:
             periods: List of periods for sub-discriminators
@@ -71,15 +121,14 @@ class MultiPeriodDiscriminator(nnx.Module):
             rngs: Random number generators for initialization
         """
         self.discriminators = [
-            PeriodDiscriminator(period, kernel_size, stride, rngs)
-            for period in periods
+            PeriodDiscriminator(period, kernel_size, stride, rngs) for period in periods
         ]
 
     def __call__(self, x: jax.Array) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         """
         Args:
             x: Input waveform of shape [B, T] or [B, T, 1]
-            
+
         Returns:
             outputs: List of discriminator outputs from each sub-discriminator
             feature_maps: List of feature maps from each sub-discriminator

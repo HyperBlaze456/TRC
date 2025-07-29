@@ -4,7 +4,7 @@ import jax
 
 class ScaleDiscriminator(nnx.Module):
     """Single scale discriminator that operates on audio at a specific downsampling rate.
-    
+
     Based on DAC's multi-scale discriminator architecture.
     """
 
@@ -15,7 +15,7 @@ class ScaleDiscriminator(nnx.Module):
         kernel_size: int = 15,
         groups: list[int] = [1, 4, 16, 64, 256, 1],
         strides: int = 1,
-        rngs: nnx.Rngs = None
+        rngs: nnx.Rngs = None,
     ):
         if rngs is None:
             rngs = nnx.Rngs(0)
@@ -40,28 +40,28 @@ class ScaleDiscriminator(nnx.Module):
                 strides=s,
                 padding="SAME",
                 feature_group_count=group,
-                rngs=rngs
+                rngs=rngs,
             )
             self.convs.append(conv)
 
             # Add group norm for all layers except last
             if not is_last:
                 norm = nnx.GroupNorm(
-                    num_groups=group,
-                    num_features=out_channels,
-                    rngs=rngs
+                    num_groups=group, num_features=out_channels, rngs=rngs
                 )
                 self.norms.append(norm)
 
             in_channels = out_channels
 
-    def __call__(self, x: jax.Array, training: bool = True) -> tuple[jax.Array, list[jax.Array]]:
+    def __call__(
+        self, x: jax.Array, training: bool = True
+    ) -> tuple[jax.Array, list[jax.Array]]:
         """Forward pass returning output and intermediate features.
-        
+
         Args:
             x: Input audio [B, T, 1]
             training: Whether in training mode
-            
+
         Returns:
             output: Discriminator output [B, T', 1]
             features: List of intermediate feature maps
@@ -71,7 +71,9 @@ class ScaleDiscriminator(nnx.Module):
         # Downsample input if rate > 1
         if self.rate > 1:
             # Average pooling for downsampling
-            x = nnx.avg_pool(x, window_shape=(self.rate,), strides=(self.rate,), padding="VALID")
+            x = nnx.avg_pool(
+                x, window_shape=(self.rate,), strides=(self.rate,), padding="VALID"
+            )
 
         # Apply conv layers
         for i, conv in enumerate(self.convs):
@@ -88,10 +90,10 @@ class ScaleDiscriminator(nnx.Module):
 
 class MultiScaleDiscriminator(nnx.Module):
     """Multi-scale discriminator combining discriminators at different temporal resolutions.
-    
+
     Uses 3 discriminators operating on:
     - Original audio (rate=1)
-    - 2x downsampled audio (rate=2)  
+    - 2x downsampled audio (rate=2)
     - 4x downsampled audio (rate=4)
     """
 
@@ -101,7 +103,7 @@ class MultiScaleDiscriminator(nnx.Module):
         channels: list[int] = [16, 64, 256, 1024, 1024, 1024],
         kernel_size: int = 15,
         groups: list[int] = [1, 4, 16, 64, 256, 1],
-        rngs: nnx.Rngs = None
+        rngs: nnx.Rngs = None,
     ):
         if rngs is None:
             rngs = nnx.Rngs(0)
@@ -113,17 +115,19 @@ class MultiScaleDiscriminator(nnx.Module):
                 channels=channels,
                 kernel_size=kernel_size,
                 groups=groups,
-                rngs=rngs
+                rngs=rngs,
             )
             self.discriminators.append(disc)
 
-    def __call__(self, x: jax.Array, training: bool = True) -> tuple[list[jax.Array], list[list[jax.Array]]]:
+    def __call__(
+        self, x: jax.Array, training: bool = True
+    ) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         """Forward pass through all scale discriminators.
-        
+
         Args:
             x: Input audio [B, T, 1]
             training: Whether in training mode
-            
+
         Returns:
             outputs: List of discriminator outputs, one per scale
             features: List of feature lists, one per scale
@@ -137,4 +141,3 @@ class MultiScaleDiscriminator(nnx.Module):
             all_features.append(features)
 
         return outputs, all_features
-

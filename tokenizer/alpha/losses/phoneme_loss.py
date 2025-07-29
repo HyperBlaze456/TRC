@@ -16,10 +16,10 @@ def compute_ctc_loss(
     labels: jax.Array,
     label_paddings: jax.Array,
     blank_id: int = 0,
-    log_epsilon: float = -100000.0
+    log_epsilon: float = -100000.0,
 ) -> jax.Array:
     """Compute CTC loss for phoneme prediction.
-    
+
     Args:
         logits: Model predictions with shape [B, T, K] where:
             B = batch size
@@ -30,7 +30,7 @@ def compute_ctc_loss(
         label_paddings: Padding mask for labels [B, N] where 1.0 = padded
         blank_id: Index of blank token (default: 0)
         log_epsilon: Small value for numerical stability
-        
+
     Returns:
         ctc_losses: Per-sequence CTC loss [B]
     """
@@ -41,7 +41,7 @@ def compute_ctc_loss(
         labels=labels,
         label_paddings=label_paddings,
         blank_id=blank_id,
-        log_epsilon=log_epsilon
+        log_epsilon=log_epsilon,
     )
 
     return ctc_losses
@@ -53,13 +53,13 @@ def phoneme_ctc_loss(
     phoneme_indices: jax.Array,
     phoneme_mask: jax.Array,
     blank_id: int = 0,
-    reduction: str = "mean"
+    reduction: str = "mean",
 ) -> tuple[jax.Array, dict]:
     """Compute phoneme CTC loss with proper masking.
-    
+
     This function handles the conversion from encoder masks to CTC-compatible
     padding format and computes the loss.
-    
+
     Args:
         phoneme_logits: Phoneme predictions from model [B, T, K] where:
             - B = batch size
@@ -70,7 +70,7 @@ def phoneme_ctc_loss(
         phoneme_mask: Phoneme padding mask [B, N] where 1.0 = padded (CTC format)
         blank_id: Index of blank token (default: 0)
         reduction: How to reduce batch losses ('mean', 'sum', or 'none')
-        
+
     Returns:
         loss: Scalar loss (if reduction != 'none') or per-sequence losses [B]
         metrics: Dictionary with additional metrics for logging
@@ -86,7 +86,7 @@ def phoneme_ctc_loss(
         logit_paddings=logit_paddings,
         labels=phoneme_indices,
         label_paddings=phoneme_mask,  # Must be in CTC format, 1.0 for padded and 0.0 for not. Should be from the batch.
-        blank_id=blank_id # 0
+        blank_id=blank_id,  # 0
     )
 
     # Apply reduction
@@ -113,6 +113,7 @@ def phoneme_ctc_loss(
     }
 
     return loss, metrics
+
 
 """
 Note: The loss function has non-array arguments that changes behavior(reduction, blank_id).

@@ -8,26 +8,21 @@ class JAXAudioStreamingDataset:
     """Minimal wrapper around HuggingFace IterableDataset for audio streaming with JAX"""
 
     def __init__(
-            self,
-            dataset_name: str,
-            split: str = "train",
-            batch_size: int = 32,
-            sampling_rate: int = 16000,
-            drop_last_batch: bool = False,
-            dtype: jnp.dtype = jnp.float32
+        self,
+        dataset_name: str,
+        split: str = "train",
+        batch_size: int = 32,
+        sampling_rate: int = 16000,
+        drop_last_batch: bool = False,
+        dtype: jnp.dtype = jnp.float32,
     ):
         # Load dataset in streaming mode - creates an IterableDataset
-        self.dataset = load_dataset(
-            dataset_name,
-            split=split,
-            streaming=True
-        )
+        self.dataset = load_dataset(dataset_name, split=split, streaming=True)
 
         # Cast audio column to desired sampling rate (resampling happens on-the-fly)
         if "audio" in self.dataset.features:
             self.dataset = self.dataset.cast_column(
-                "audio",
-                Audio(sampling_rate=sampling_rate)
+                "audio", Audio(sampling_rate=sampling_rate)
             )
 
         self.batch_size = batch_size
@@ -39,8 +34,7 @@ class JAXAudioStreamingDataset:
         """Iterate over batched examples as JAX arrays"""
         # Create batched iterator
         batched_dataset = self.dataset.batch(
-            batch_size=self.batch_size,
-            drop_last_batch=self.drop_last_batch
+            batch_size=self.batch_size, drop_last_batch=self.drop_last_batch
         )
 
         for batch in batched_dataset:
@@ -52,8 +46,9 @@ class JAXAudioStreamingDataset:
 
         # Convert audio arrays
         if "audio" in batch:
-            audio_arrays = [jnp.array(audio["array"], dtype=self.dtype)
-                            for audio in batch["audio"]]
+            audio_arrays = [
+                jnp.array(audio["array"], dtype=self.dtype) for audio in batch["audio"]
+            ]
 
             # Pad and stack
             padded_audio, lengths = self._pad_sequences(audio_arrays)
@@ -85,7 +80,7 @@ class JAXAudioStreamingDataset:
         for seq in sequences:
             pad_width = max_length - len(seq)
             if pad_width > 0:
-                padded_seq = jnp.pad(seq, (0, pad_width), mode='constant')
+                padded_seq = jnp.pad(seq, (0, pad_width), mode="constant")
             else:
                 padded_seq = seq
             padded.append(padded_seq)
@@ -104,7 +99,7 @@ def minimal_jax_example():
         "PolyAI/minds14",  # Multi-lingual banking intent dataset
         name="en-US",  # English subset
         split="train",
-        streaming=True
+        streaming=True,
     )
 
     # Iterate over first 3 examples
@@ -122,7 +117,9 @@ def minimal_jax_example():
         print(f"  Audio dtype: {audio_array.dtype}")
         print(f"  Sample rate: {sample_rate} Hz")
         print(f"  Duration: {duration:.2f} seconds")
-        print(f"  Min/Max values: {jnp.min(audio_array):.4f} / {jnp.max(audio_array):.4f}")
+        print(
+            f"  Min/Max values: {jnp.min(audio_array):.4f} / {jnp.max(audio_array):.4f}"
+        )
 
 
 # Batched JAX processing example
@@ -136,7 +133,7 @@ def batched_jax_example():
         split="train",
         batch_size=4,
         sampling_rate=16000,
-        dtype=jnp.float32
+        dtype=jnp.float32,
     )
 
     # Process first 2 batches
@@ -151,8 +148,8 @@ def batched_jax_example():
         print(f"  Audio lengths: {batch['audio_lengths']}")
 
         # Simple JAX operations
-        audio_mean = jnp.mean(batch['audio'], axis=1)
-        audio_std = jnp.std(batch['audio'], axis=1)
+        audio_mean = jnp.mean(batch["audio"], axis=1)
+        audio_std = jnp.std(batch["audio"], axis=1)
         print(f"  Batch audio means shape: {audio_mean.shape}")
         print(f"  Batch audio stds shape: {audio_std.shape}")
 
@@ -163,10 +160,7 @@ def advanced_jax_preprocessing():
     print("\n=== Advanced JAX Preprocessing Example ===")
 
     dataset = load_dataset(
-        "PolyAI/minds14",
-        name="en-US",
-        split="train",
-        streaming=True
+        "PolyAI/minds14", name="en-US", split="train", streaming=True
     )
 
     def extract_jax_features(examples):
@@ -177,22 +171,20 @@ def advanced_jax_preprocessing():
             arr = jnp.array(audio["array"], dtype=jnp.float32)
 
             # JAX-based feature extraction
-            features.append({
-                "mean": float(jnp.mean(arr)),
-                "std": float(jnp.std(arr)),
-                "max_amp": float(jnp.max(jnp.abs(arr))),
-                "rms": float(jnp.sqrt(jnp.mean(arr ** 2))),
-                "duration": len(arr) / audio["sampling_rate"]
-            })
+            features.append(
+                {
+                    "mean": float(jnp.mean(arr)),
+                    "std": float(jnp.std(arr)),
+                    "max_amp": float(jnp.max(jnp.abs(arr))),
+                    "rms": float(jnp.sqrt(jnp.mean(arr**2))),
+                    "duration": len(arr) / audio["sampling_rate"],
+                }
+            )
         examples["audio_features"] = features
         return examples
 
     # Apply preprocessing on-the-fly with batching
-    processed_dataset = dataset.map(
-        extract_jax_features,
-        batched=True,
-        batch_size=8
-    )
+    processed_dataset = dataset.map(extract_jax_features, batched=True, batch_size=8)
 
     # Check first example
     first = next(iter(processed_dataset))
@@ -206,10 +198,7 @@ def manual_jax_batch_iteration():
     print("\n=== Manual JAX Batch Iteration ===")
 
     dataset = load_dataset(
-        "PolyAI/minds14",
-        name="en-US",
-        split="train",
-        streaming=True
+        "PolyAI/minds14", name="en-US", split="train", streaming=True
     )
 
     batch_size = 4
@@ -223,13 +212,13 @@ def manual_jax_batch_iteration():
         magnitude = jnp.abs(fft)
 
         # Simple features
-        energy = jnp.sum(audio_batch ** 2, axis=1)
+        energy = jnp.sum(audio_batch**2, axis=1)
         spectral_centroid = jnp.sum(magnitude, axis=1) / (magnitude.shape[1] + 1e-8)
 
         return {
             "energy": energy,
             "spectral_centroid": spectral_centroid,
-            "magnitude_mean": jnp.mean(magnitude, axis=1)
+            "magnitude_mean": jnp.mean(magnitude, axis=1),
         }
 
     for idx, example in enumerate(dataset):
@@ -237,15 +226,16 @@ def manual_jax_batch_iteration():
 
         if len(batch) == batch_size:
             # Convert to JAX arrays and pad
-            audio_arrays = [jnp.array(ex["audio"]["array"], dtype=jnp.float32)
-                            for ex in batch]
+            audio_arrays = [
+                jnp.array(ex["audio"]["array"], dtype=jnp.float32) for ex in batch
+            ]
 
             # Manual padding
             max_len = max(len(arr) for arr in audio_arrays)
             padded_arrays = []
             for arr in audio_arrays:
                 if len(arr) < max_len:
-                    padded = jnp.pad(arr, (0, max_len - len(arr)), mode='constant')
+                    padded = jnp.pad(arr, (0, max_len - len(arr)), mode="constant")
                 else:
                     padded = arr
                 padded_arrays.append(padded)
@@ -279,7 +269,7 @@ def jax_training_data_generator():
         split="train",
         batch_size=8,
         sampling_rate=16000,
-        dtype=jnp.float32
+        dtype=jnp.float32,
     )
 
     def data_generator():
@@ -300,7 +290,7 @@ def jax_training_data_generator():
                 yield {
                     "audio": audio,
                     "labels": labels,
-                    "audio_lengths": batch["audio_lengths"]
+                    "audio_lengths": batch["audio_lengths"],
                 }
 
     # Example: get a few batches

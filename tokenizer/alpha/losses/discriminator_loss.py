@@ -15,18 +15,18 @@ import optax
 # LSGAN Discriminator Loss
 # ============================================================================
 
+
 def lsgan_d_loss(
-    real_outputs: list[jax.Array],
-    fake_outputs: list[jax.Array]
+    real_outputs: list[jax.Array], fake_outputs: list[jax.Array]
 ) -> jax.Array:
     """LSGAN discriminator loss.
-    
+
     For LSGAN, discriminator tries to output 1 for real and 0 for fake.
-    
+
     Args:
         real_outputs: List of discriminator outputs for real samples
         fake_outputs: List of discriminator outputs for generated samples
-        
+
     Returns:
         Scalar discriminator loss
     """
@@ -45,18 +45,18 @@ def lsgan_d_loss(
 # Hinge Discriminator Loss
 # ============================================================================
 
+
 def hinge_d_loss(
-    real_outputs: list[jax.Array],
-    fake_outputs: list[jax.Array]
+    real_outputs: list[jax.Array], fake_outputs: list[jax.Array]
 ) -> jax.Array:
     """Hinge discriminator loss using optax.
-    
+
     For Hinge loss, discriminator tries to output >1 for real and <-1 for fake.
-    
+
     Args:
         real_outputs: List of discriminator outputs for real samples
         fake_outputs: List of discriminator outputs for generated samples
-        
+
     Returns:
         Scalar discriminator loss
     """
@@ -79,18 +79,19 @@ def hinge_d_loss(
 # Combined Discriminator Loss Function
 # ============================================================================
 
+
 def compute_discriminator_loss(
     disc_outputs_real: list[jax.Array],
     disc_outputs_fake: list[jax.Array],
-    loss_type: str = "lsgan"
+    loss_type: str = "lsgan",
 ) -> tuple[jax.Array, dict]:
     """Compute discriminator loss.
-    
+
     Args:
         disc_outputs_real: Discriminator outputs for real samples
         disc_outputs_fake: Discriminator outputs for fake samples
         loss_type: "lsgan" or "hinge"
-        
+
     Returns:
         total_loss: Scalar discriminator loss
         metrics: Dictionary of loss components
@@ -121,5 +122,9 @@ def compute_discriminator_loss(
 # ============================================================================
 
 # Discriminator loss functions with static loss_type
-compute_discriminator_loss_lsgan = partial(compute_discriminator_loss, loss_type="lsgan")
-compute_discriminator_loss_hinge = partial(compute_discriminator_loss, loss_type="hinge")
+compute_discriminator_loss_lsgan = partial(
+    compute_discriminator_loss, loss_type="lsgan"
+)
+compute_discriminator_loss_hinge = partial(
+    compute_discriminator_loss, loss_type="hinge"
+)

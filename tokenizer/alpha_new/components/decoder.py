@@ -15,7 +15,7 @@ class CausalConvTranspose(nnx.Module):
         dilation: int = 1,
         *,
         use_bias: bool = True,
-        **kwargs,  # initializers, dtype …
+        **kwargs,
     ):
         self.stride = stride
         self.dilation = dilation
@@ -51,7 +51,7 @@ class RawDecoder(nnx.Module):
     ):
         """
         Args:
-            hidden_size: encoder output dim
+            hidden_size: latent dim size of the encoder output
         """
         self.output_48khz = output_48khz
 

@@ -24,10 +24,7 @@ from functools import partial
 import optax
 
 
-def extract_encoder_lengths(
-        mask: jax.Array,
-        downsample_factor: int
-) -> jax.Array:
+def extract_encoder_lengths(mask: jax.Array, downsample_factor: int) -> jax.Array:
     """Extract encoder sequence lengths from audio-level mask.
 
     Args:
@@ -58,10 +55,9 @@ def extract_encoder_lengths(
 # Masked Loss Utilities
 # ============================================================================
 
+
 def apply_mask_to_loss(
-        loss: jax.Array,
-        mask: jax.Array,
-        reduction: str = "mean"
+    loss: jax.Array, mask: jax.Array, reduction: str = "mean"
 ) -> jax.Array:
     """Apply mask to loss values, handling padding properly.
 
@@ -107,11 +103,12 @@ def apply_mask_to_loss(
 # Reconstruction Losses
 # ============================================================================
 
+
 def l1_loss(
-        predictions: jax.Array,
-        targets: jax.Array,
-        mask: Optional[jax.Array] = None,
-        reduction: str = "mean"
+    predictions: jax.Array,
+    targets: jax.Array,
+    mask: Optional[jax.Array] = None,
+    reduction: str = "mean",
 ) -> jax.Array:
     """L1 loss with optional masking.
 
@@ -137,10 +134,10 @@ def l1_loss(
 
 
 def l2_loss(
-        predictions: jax.Array,
-        targets: jax.Array,
-        mask: Optional[jax.Array] = None,
-        reduction: str = "mean"
+    predictions: jax.Array,
+    targets: jax.Array,
+    mask: Optional[jax.Array] = None,
+    reduction: str = "mean",
 ) -> jax.Array:
     """L2 loss with optional masking.
 
@@ -169,11 +166,12 @@ def l2_loss(
 # Spectral Losses
 # ============================================================================
 
+
 def stft(
-        audio: jax.Array,
-        n_fft: int = 1024,
-        hop_length: int = 256,
-        win_length: Optional[int] = None
+    audio: jax.Array,
+    n_fft: int = 1024,
+    hop_length: int = 256,
+    win_length: Optional[int] = None,
 ) -> jax.Array:
     """Compute STFT of audio signal.
 
@@ -194,24 +192,24 @@ def stft(
 
     # Use JAX's built-in STFT for efficiency
     _, _, Zxx = jax.scipy.signal.stft(
-        audio, 
+        audio,
         nperseg=win_length,
         noverlap=win_length - hop_length,
         nfft=n_fft,
         boundary=None,
         padded=False,
-        axis=-1
+        axis=-1,
     )
-    
+
     return Zxx
 
 
 def spectral_convergence_loss(
-        pred_audio: jax.Array,
-        target_audio: jax.Array,
-        n_ffts: List[int] = [512, 1024, 2048],
-        hop_lengths: Optional[List[int]] = None,
-        mask: Optional[jax.Array] = None
+    pred_audio: jax.Array,
+    target_audio: jax.Array,
+    n_ffts: List[int] = [512, 1024, 2048],
+    hop_lengths: Optional[List[int]] = None,
+    mask: Optional[jax.Array] = None,
 ) -> jax.Array:
     """Multi-resolution spectral convergence loss.
 
@@ -267,11 +265,11 @@ def spectral_convergence_loss(
 
 
 def log_magnitude_loss(
-        pred_audio: jax.Array,
-        target_audio: jax.Array,
-        n_ffts: List[int] = [512, 1024, 2048],
-        hop_lengths: Optional[List[int]] = None,
-        mask: Optional[jax.Array] = None
+    pred_audio: jax.Array,
+    target_audio: jax.Array,
+    n_ffts: List[int] = [512, 1024, 2048],
+    hop_lengths: Optional[List[int]] = None,
+    mask: Optional[jax.Array] = None,
 ) -> jax.Array:
     """Multi-resolution log magnitude loss.
 
@@ -326,11 +324,9 @@ def log_magnitude_loss(
 # Quantizer-specific Losses
 # ============================================================================
 
+
 def phoneme_commitment_loss(
-        z: jax.Array,
-        z_q: jax.Array,
-        mask: Optional[jax.Array] = None,
-        beta: float = 0.1
+    z: jax.Array, z_q: jax.Array, mask: Optional[jax.Array] = None, beta: float = 0.1
 ) -> jax.Array:
     """Commitment loss for VQ layer (phoneme).
 
@@ -351,10 +347,10 @@ def phoneme_commitment_loss(
 
 
 def bsq_commitment_loss(
-        residual: jax.Array,
-        residual_q: jax.Array,
-        mask: Optional[jax.Array] = None,
-        gamma: float = 1.0
+    residual: jax.Array,
+    residual_q: jax.Array,
+    mask: Optional[jax.Array] = None,
+    gamma: float = 1.0,
 ) -> jax.Array:
     """Commitment loss for BSQ layer (acoustic features).
 
@@ -375,11 +371,11 @@ def bsq_commitment_loss(
 
 
 def ctc_loss(
-        logits: jax.Array,
-        phoneme_targets: jax.Array,
-        logit_lengths: jax.Array,
-        target_lengths: jax.Array,
-        blank_id: int = 0
+    logits: jax.Array,
+    phoneme_targets: jax.Array,
+    logit_lengths: jax.Array,
+    target_lengths: jax.Array,
+    blank_id: int = 0,
 ) -> jax.Array:
     """CTC loss for phoneme prediction from VQ layer.
 
@@ -400,7 +396,7 @@ def ctc_loss(
         logit_paddings=_lengths_to_paddings(logit_lengths, logits.shape[1]),
         labels=phoneme_targets,
         label_paddings=_lengths_to_paddings(target_lengths, phoneme_targets.shape[1]),
-        blank_id=blank_id
+        blank_id=blank_id,
     )
 
     # Average over batch
@@ -423,13 +419,13 @@ def _lengths_to_paddings(lengths: jax.Array, max_length: int) -> jax.Array:
 
 
 def phoneme_ctc_loss(
-        encoder_output: jax.Array,
-        phoneme_codebook: jax.Array,
-        phoneme_targets: jax.Array,
-        encoder_lengths: jax.Array,
-        target_lengths: jax.Array,
-        temperature: float = 1.0,
-        blank_id: int = 0
+    encoder_output: jax.Array,
+    phoneme_codebook: jax.Array,
+    phoneme_targets: jax.Array,
+    encoder_lengths: jax.Array,
+    target_lengths: jax.Array,
+    temperature: float = 1.0,
+    blank_id: int = 0,
 ) -> Tuple[jax.Array, jax.Array]:
     """Compute CTC loss for phoneme prediction using VQ similarity scores.
 
@@ -458,7 +454,9 @@ def phoneme_ctc_loss(
     codebook_expanded = phoneme_codebook[None, None, :, :]
 
     # L2 distances
-    distances = jnp.sum(jnp.square(encoder_expanded - codebook_expanded), axis=-1)  # [B, T, vocab_size]
+    distances = jnp.sum(
+        jnp.square(encoder_expanded - codebook_expanded), axis=-1
+    )  # [B, T, vocab_size]
 
     # Convert distances to log probabilities (closer = higher probability)
     logits = -distances / temperature  # [B, T, vocab_size]
@@ -473,18 +471,18 @@ def phoneme_ctc_loss(
         phoneme_targets=phoneme_targets,
         logit_lengths=encoder_lengths,
         target_lengths=target_lengths,
-        blank_id=blank_id
+        blank_id=blank_id,
     )
 
     return loss, predicted_indices
 
 
 def prepare_phoneme_targets(
-        texts: List[str],
-        g2p_function: Callable[[str], List[str]],
-        phoneme_vocab: Dict[str, int],
-        max_length: Optional[int] = None,
-        pad_id: int = 0
+    texts: List[str],
+    g2p_function: Callable[[str], List[str]],
+    phoneme_vocab: Dict[str, int],
+    max_length: Optional[int] = None,
+    pad_id: int = 0,
 ) -> Tuple[jax.Array, jax.Array]:
     """Convert text to phoneme sequences for CTC loss.
 
@@ -506,7 +504,7 @@ def prepare_phoneme_targets(
         phonemes = g2p_function(text)
 
         # Convert phonemes to indices
-        indices = [phoneme_vocab.get(p, phoneme_vocab.get('UNK', 0)) for p in phonemes]
+        indices = [phoneme_vocab.get(p, phoneme_vocab.get("UNK", 0)) for p in phonemes]
 
         phoneme_sequences.append(indices)
         lengths.append(len(indices))
@@ -528,11 +526,11 @@ def prepare_phoneme_targets(
 
 
 def phoneme_error_rate(
-        predicted_indices: jax.Array,
-        target_indices: jax.Array,
-        predicted_lengths: jax.Array,
-        target_lengths: jax.Array,
-        blank_id: int = 0
+    predicted_indices: jax.Array,
+    target_indices: jax.Array,
+    predicted_lengths: jax.Array,
+    target_lengths: jax.Array,
+    blank_id: int = 0,
 ) -> jax.Array:
     """Compute phoneme error rate for monitoring.
 
@@ -589,10 +587,9 @@ def remove_ctc_blanks(sequence: jax.Array, blank_id: int) -> jax.Array:
         return sequence_no_blanks
 
     # Check where values change
-    changes = jnp.concatenate([
-        jnp.array([True]),
-        sequence_no_blanks[1:] != sequence_no_blanks[:-1]
-    ])
+    changes = jnp.concatenate(
+        [jnp.array([True]), sequence_no_blanks[1:] != sequence_no_blanks[:-1]]
+    )
 
     return sequence_no_blanks[changes]
 
@@ -624,10 +621,15 @@ def edit_distance(seq1: jax.Array, seq2: jax.Array) -> float:
             if seq1[i - 1] == seq2[j - 1]:
                 dp = dp.at[i, j].set(dp[i - 1, j - 1])
             else:
-                dp = dp.at[i, j].set(1 + jnp.minimum(
-                    dp[i - 1, j],  # Deletion
-                    jnp.minimum(dp[i, j - 1], dp[i - 1, j - 1])  # Insertion, Substitution
-                ))
+                dp = dp.at[i, j].set(
+                    1
+                    + jnp.minimum(
+                        dp[i - 1, j],  # Deletion
+                        jnp.minimum(
+                            dp[i, j - 1], dp[i - 1, j - 1]
+                        ),  # Insertion, Substitution
+                    )
+                )
 
     return dp[len1, len2]
 
@@ -636,11 +638,12 @@ def edit_distance(seq1: jax.Array, seq2: jax.Array) -> float:
 # Phoneme Vocabulary Utilities
 # ============================================================================
 
+
 def create_phoneme_vocabulary(
-        possible_phonemes: Optional[List[str]] = None,
-        blank_token: str = "_",
-        unk_token: str = "UNK",
-        pad_token: str = "PAD"
+    possible_phonemes: Optional[List[str]] = None,
+    blank_token: str = "_",
+    unk_token: str = "UNK",
+    pad_token: str = "PAD",
 ) -> Dict[str, int]:
     """Create phoneme vocabulary mapping symbols to indices.
 
@@ -656,16 +659,158 @@ def create_phoneme_vocabulary(
     if possible_phonemes is None:
         # Default Emilia dataset phonemes for multilingual support
         possible_phonemes = [
-            "N", "a", "ai", "an", "au", "aı", "aŋ", "aɔ", "aː", "b", "bʲ", "d", "dz", "dʑ", "dʒ", "d͡ʑ",
-            "e", "ei", "eɪ", "eː", "f", "g", "gʲ", "h", "i", "ia", "iau", "in", "iç", "iŋ", "iən", "iəu",
-            "iɛ", "iʊŋ", "iː", "i̥", "j", "ja", "je", "jo", "ju", "jɛ", "jʌ", "k", "kʰ", "kʲ", "k͈", "l",
-            "m", "mʲ", "n", "nʲ", "o", "ou", "oʊ", "oː", "o̯e", "p", "pf", "pʰ", "pʲ", "p͈", "r", "s", "s͈",
-            "t", "ts", "tsʰ", "tɕ", "tɕʰ", "tʃ", "tʰ", "t͈", "t͡ɕ", "t͡ɕʰ", "t͡ɕ͈", "u", "ua", "uai", "uan",
-            "uaŋ", "uŋ", "uəi", "uən", "uː", "u̥", "v", "w", "wa", "we", "wi", "wɛ", "wʌ", "x", "y", "yn",
-            "yən", "yɛ", "yʊŋ", "yː", "z", "æ", "ç", "ð", "ø", "øː", "ı", "ŋ", "œ", "œ̃", "ɑ", "ɑɪ", "ɑʊ",
-            "ɑ̃", "ɔ", "ɔø", "ɔɪ", "ɔ̃", "ɕ", "ə", "ən", "əu", "ɚ", "ɛ", "ɛɹ", "ɛː", "ɛ̃", "ɝ", "ɤ", "ɥ",
-            "ɪ", "ɪɹ", "ɯ", "ɰi", "ɲ", "ɸ", "ɹ", "ɻ", "ɾ", "ɾʲ", "ʀ", "ʁ", "ʂ", "ʃ", "ʈʂ", "ʈʂʰ", "ʊ",
-            "ʊŋ", "ʊɹ", "ʌ", "ʒ", "θ"
+            "N",
+            "a",
+            "ai",
+            "an",
+            "au",
+            "aı",
+            "aŋ",
+            "aɔ",
+            "aː",
+            "b",
+            "bʲ",
+            "d",
+            "dz",
+            "dʑ",
+            "dʒ",
+            "d͡ʑ",
+            "e",
+            "ei",
+            "eɪ",
+            "eː",
+            "f",
+            "g",
+            "gʲ",
+            "h",
+            "i",
+            "ia",
+            "iau",
+            "in",
+            "iç",
+            "iŋ",
+            "iən",
+            "iəu",
+            "iɛ",
+            "iʊŋ",
+            "iː",
+            "i̥",
+            "j",
+            "ja",
+            "je",
+            "jo",
+            "ju",
+            "jɛ",
+            "jʌ",
+            "k",
+            "kʰ",
+            "kʲ",
+            "k͈",
+            "l",
+            "m",
+            "mʲ",
+            "n",
+            "nʲ",
+            "o",
+            "ou",
+            "oʊ",
+            "oː",
+            "o̯e",
+            "p",
+            "pf",
+            "pʰ",
+            "pʲ",
+            "p͈",
+            "r",
+            "s",
+            "s͈",
+            "t",
+            "ts",
+            "tsʰ",
+            "tɕ",
+            "tɕʰ",
+            "tʃ",
+            "tʰ",
+            "t͈",
+            "t͡ɕ",
+            "t͡ɕʰ",
+            "t͡ɕ͈",
+            "u",
+            "ua",
+            "uai",
+            "uan",
+            "uaŋ",
+            "uŋ",
+            "uəi",
+            "uən",
+            "uː",
+            "u̥",
+            "v",
+            "w",
+            "wa",
+            "we",
+            "wi",
+            "wɛ",
+            "wʌ",
+            "x",
+            "y",
+            "yn",
+            "yən",
+            "yɛ",
+            "yʊŋ",
+            "yː",
+            "z",
+            "æ",
+            "ç",
+            "ð",
+            "ø",
+            "øː",
+            "ı",
+            "ŋ",
+            "œ",
+            "œ̃",
+            "ɑ",
+            "ɑɪ",
+            "ɑʊ",
+            "ɑ̃",
+            "ɔ",
+            "ɔø",
+            "ɔɪ",
+            "ɔ̃",
+            "ɕ",
+            "ə",
+            "ən",
+            "əu",
+            "ɚ",
+            "ɛ",
+            "ɛɹ",
+            "ɛː",
+            "ɛ̃",
+            "ɝ",
+            "ɤ",
+            "ɥ",
+            "ɪ",
+            "ɪɹ",
+            "ɯ",
+            "ɰi",
+            "ɲ",
+            "ɸ",
+            "ɹ",
+            "ɻ",
+            "ɾ",
+            "ɾʲ",
+            "ʀ",
+            "ʁ",
+            "ʂ",
+            "ʃ",
+            "ʈʂ",
+            "ʈʂʰ",
+            "ʊ",
+            "ʊŋ",
+            "ʊɹ",
+            "ʌ",
+            "ʒ",
+            "θ",
         ]
 
     # Build vocabulary with special tokens first
@@ -683,8 +828,7 @@ def create_phoneme_vocabulary(
 
 
 def adversarial_g_loss(
-        disc_outputs: List[jax.Array],
-        loss_type: str = "hinge"
+    disc_outputs: List[jax.Array], loss_type: str = "hinge"
 ) -> jax.Array:
     """Generator adversarial loss.
 
@@ -711,9 +855,9 @@ def adversarial_g_loss(
 
 
 def adversarial_d_loss(
-        real_outputs: List[jax.Array],
-        fake_outputs: List[jax.Array],
-        loss_type: str = "hinge"
+    real_outputs: List[jax.Array],
+    fake_outputs: List[jax.Array],
+    loss_type: str = "hinge",
 ) -> jax.Array:
     """Discriminator adversarial loss.
 
@@ -743,9 +887,9 @@ def adversarial_d_loss(
 
 
 def feature_matching_loss(
-        real_features: List[List[jax.Array]],
-        fake_features: List[List[jax.Array]],
-        mask: Optional[jax.Array] = None
+    real_features: List[List[jax.Array]],
+    fake_features: List[List[jax.Array]],
+    mask: Optional[jax.Array] = None,
 ) -> jax.Array:
     """Feature matching loss for better training stability.
 
@@ -764,7 +908,7 @@ def feature_matching_loss(
             loss = l1_loss(
                 fake_f,
                 jax.lax.stop_gradient(real_f),
-                mask=mask if mask is not None and real_f.ndim == 3 else None
+                mask=mask if mask is not None and real_f.ndim == 3 else None,
             )
             total_loss += loss
 
@@ -777,24 +921,25 @@ def feature_matching_loss(
 # Combined Loss Functions
 # ============================================================================
 
+
 def compute_generator_loss(
-        pred_audio: jax.Array,
-        target_audio: jax.Array,
-        encoder_output: jax.Array,
-        phoneme_quantized: jax.Array,
-        residual: jax.Array,
-        residual_quantized: jax.Array,
-        phoneme_indices: jax.Array,
-        phoneme_targets: jax.Array,
-        phoneme_codebook: jax.Array,
-        encoder_lengths: jax.Array,
-        target_lengths: jax.Array,
-        disc_outputs_fake: List[jax.Array],
-        disc_features_real: List[List[jax.Array]],
-        disc_features_fake: List[List[jax.Array]],
-        mask: Optional[jax.Array] = None,
-        encoder_mask: Optional[jax.Array] = None,
-        config: Optional[Dict] = None
+    pred_audio: jax.Array,
+    target_audio: jax.Array,
+    encoder_output: jax.Array,
+    phoneme_quantized: jax.Array,
+    residual: jax.Array,
+    residual_quantized: jax.Array,
+    phoneme_indices: jax.Array,
+    phoneme_targets: jax.Array,
+    phoneme_codebook: jax.Array,
+    encoder_lengths: jax.Array,
+    target_lengths: jax.Array,
+    disc_outputs_fake: List[jax.Array],
+    disc_features_real: List[List[jax.Array]],
+    disc_features_fake: List[List[jax.Array]],
+    mask: Optional[jax.Array] = None,
+    encoder_mask: Optional[jax.Array] = None,
+    config: Optional[Dict] = None,
 ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
     """Compute all generator losses.
 
@@ -822,29 +967,27 @@ def compute_generator_loss(
     """
     if config is None:
         config = {
-            'l1_weight': 1.0,
-            'l2_weight': 1.0,
-            'spectral_weight': 2.0,
-            'log_mag_weight': 1.0,
-            'ctc_weight': 10.0,  # High weight for phoneme transcription task
-            'phoneme_commit_weight': 0.1,  # Lower commitment for VQ flexibility
-            'bsq_commit_weight': 1.0,
-            'adversarial_weight': 1.0,
-            'feature_match_weight': 10.0,
-            'ctc_temperature': 1.0,  # Temperature for CTC softmax
+            "l1_weight": 1.0,
+            "l2_weight": 1.0,
+            "spectral_weight": 2.0,
+            "log_mag_weight": 1.0,
+            "ctc_weight": 10.0,  # High weight for phoneme transcription task
+            "phoneme_commit_weight": 0.1,  # Lower commitment for VQ flexibility
+            "bsq_commit_weight": 1.0,
+            "adversarial_weight": 1.0,
+            "feature_match_weight": 10.0,
+            "ctc_temperature": 1.0,  # Temperature for CTC softmax
         }
 
     losses = {}
 
     # Reconstruction losses
-    losses['l1'] = l1_loss(pred_audio, target_audio, mask=mask)
-    losses['l2'] = l2_loss(pred_audio, target_audio, mask=mask)
-    losses['spectral_convergence'] = spectral_convergence_loss(
+    losses["l1"] = l1_loss(pred_audio, target_audio, mask=mask)
+    losses["l2"] = l2_loss(pred_audio, target_audio, mask=mask)
+    losses["spectral_convergence"] = spectral_convergence_loss(
         pred_audio, target_audio, mask=mask
     )
-    losses['log_magnitude'] = log_magnitude_loss(
-        pred_audio, target_audio, mask=mask
-    )
+    losses["log_magnitude"] = log_magnitude_loss(pred_audio, target_audio, mask=mask)
 
     # Use provided encoder_mask or compute it from audio mask if not provided
     if encoder_mask is None and mask is not None:
@@ -870,46 +1013,46 @@ def compute_generator_loss(
         phoneme_targets=phoneme_targets,
         encoder_lengths=encoder_lengths,
         target_lengths=target_lengths,
-        temperature=config.get('ctc_temperature', 1.0),
-        blank_id=0
+        temperature=config.get("ctc_temperature", 1.0),
+        blank_id=0,
     )
-    losses['ctc'] = ctc_loss_value
+    losses["ctc"] = ctc_loss_value
 
     # Quantizer commitment losses
-    losses['phoneme_commitment'] = phoneme_commitment_loss(
+    losses["phoneme_commitment"] = phoneme_commitment_loss(
         encoder_output, phoneme_quantized, mask=encoder_mask, beta=0.1
     )
-    losses['bsq_commitment'] = bsq_commitment_loss(
+    losses["bsq_commitment"] = bsq_commitment_loss(
         residual, residual_quantized, mask=encoder_mask
     )
 
     # Adversarial losses
-    losses['adversarial_g'] = adversarial_g_loss(disc_outputs_fake)
-    losses['feature_matching'] = feature_matching_loss(
+    losses["adversarial_g"] = adversarial_g_loss(disc_outputs_fake)
+    losses["feature_matching"] = feature_matching_loss(
         disc_features_real, disc_features_fake
     )
 
     # Combine all losses
     total_loss = (
-            config['l1_weight'] * losses['l1'] +
-            config['l2_weight'] * losses['l2'] +
-            config['spectral_weight'] * losses['spectral_convergence'] +
-            config['log_mag_weight'] * losses['log_magnitude'] +
-            config['ctc_weight'] * losses['ctc'] +
-            config['phoneme_commit_weight'] * losses['phoneme_commitment'] +
-            config['bsq_commit_weight'] * losses['bsq_commitment'] +
-            config['adversarial_weight'] * losses['adversarial_g'] +
-            config['feature_match_weight'] * losses['feature_matching']
+        config["l1_weight"] * losses["l1"]
+        + config["l2_weight"] * losses["l2"]
+        + config["spectral_weight"] * losses["spectral_convergence"]
+        + config["log_mag_weight"] * losses["log_magnitude"]
+        + config["ctc_weight"] * losses["ctc"]
+        + config["phoneme_commit_weight"] * losses["phoneme_commitment"]
+        + config["bsq_commit_weight"] * losses["bsq_commitment"]
+        + config["adversarial_weight"] * losses["adversarial_g"]
+        + config["feature_match_weight"] * losses["feature_matching"]
     )
 
-    losses['total'] = total_loss
+    losses["total"] = total_loss
     return total_loss, losses
 
 
 def compute_discriminator_loss(
-        disc_outputs_real: List[jax.Array],
-        disc_outputs_fake: List[jax.Array],
-        loss_type: str = "hinge"
+    disc_outputs_real: List[jax.Array],
+    disc_outputs_fake: List[jax.Array],
+    loss_type: str = "hinge",
 ) -> Tuple[jax.Array, Dict[str, jax.Array]]:
     """Compute discriminator loss.
 
@@ -923,23 +1066,19 @@ def compute_discriminator_loss(
     """
     d_loss = adversarial_d_loss(disc_outputs_real, disc_outputs_fake, loss_type)
 
-    losses = {
-        'adversarial_d': d_loss,
-        'total': d_loss
-    }
+    losses = {"adversarial_d": d_loss, "total": d_loss}
 
     return d_loss, losses
 
 
-
 def compute_phoneme_metrics(
-        encoder_output: jax.Array,
-        phoneme_codebook: jax.Array,
-        phoneme_targets: jax.Array,
-        encoder_lengths: jax.Array,
-        target_lengths: jax.Array,
-        temperature: float = 1.0,
-        blank_id: int = 0
+    encoder_output: jax.Array,
+    phoneme_codebook: jax.Array,
+    phoneme_targets: jax.Array,
+    encoder_lengths: jax.Array,
+    target_lengths: jax.Array,
+    temperature: float = 1.0,
+    blank_id: int = 0,
 ) -> Dict[str, jax.Array]:
     """Compute phoneme-related metrics for monitoring.
 
@@ -963,7 +1102,7 @@ def compute_phoneme_metrics(
         encoder_lengths=encoder_lengths,
         target_lengths=target_lengths,
         temperature=temperature,
-        blank_id=blank_id
+        blank_id=blank_id,
     )
 
     # Compute phoneme error rate
@@ -972,19 +1111,20 @@ def compute_phoneme_metrics(
         target_indices=phoneme_targets,
         predicted_lengths=encoder_lengths,
         target_lengths=target_lengths,
-        blank_id=blank_id
+        blank_id=blank_id,
     )
 
     return {
-        'ctc_loss': ctc_loss_value,
-        'per': per,
-        'predicted_phonemes': predicted_indices
+        "ctc_loss": ctc_loss_value,
+        "per": per,
+        "predicted_phonemes": predicted_indices,
     }
 
 
 # ============================================================================
 # Example Usage
 # ============================================================================
+
 
 def example_usage():
     """Example of how to use these loss functions with G2P."""
@@ -996,16 +1136,17 @@ def example_usage():
             # Use phonemizer for IPA conversion
             phonemes = phonemize(
                 text,
-                language='en-us',
-                backend='espeak',
+                language="en-us",
+                backend="espeak",
                 strip=True,
                 preserve_punctuation=False,
             )
             # Split into individual phonemes
-            return list(phonemes.replace(' ', ''))
+            return list(phonemes.replace(" ", ""))
     except ImportError:
         # Fallback to g2p_en
         from g2p_en import G2p
+
         g2p = G2p()
 
         def g2p_function(text):
@@ -1019,9 +1160,7 @@ def example_usage():
 
     # Convert to phoneme targets
     phoneme_targets, target_lengths = prepare_phoneme_targets(
-        texts=texts,
-        g2p_function=g2p_function,
-        phoneme_vocab=phoneme_vocab
+        texts=texts, g2p_function=g2p_function, phoneme_vocab=phoneme_vocab
     )
 
     print(f"Phoneme vocabulary size: {len(phoneme_vocab)}")

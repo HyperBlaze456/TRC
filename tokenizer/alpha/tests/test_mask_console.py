@@ -27,7 +27,7 @@ def print_mask_demo():
     print("LEFT-PADDED SEQUENCES")
     print("=" * 40)
     for i, seq in enumerate(padded_audio):
-        print(f"Audio {i+1} (len={audio_lengths[i]}): {seq}")
+        print(f"Audio {i + 1} (len={audio_lengths[i]}): {seq}")
 
     # Create non-causal padding mask
     non_causal_mask = create_padding_mask(lengths, max_length, causal=False)
@@ -39,7 +39,7 @@ def print_mask_demo():
     print("\nMask values (True=Valid, False=Padded):")
     for i in range(len(audio_lengths)):
         mask_1d = non_causal_mask[i, 0, 0, :]
-        print(f"Audio {i+1}: {mask_1d}")
+        print(f"Audio {i + 1}: {mask_1d}")
         print(f"         {''.join(['  V' if m else '  P' for m in mask_1d])}")
 
     # Create causal padding mask
@@ -52,7 +52,9 @@ def print_mask_demo():
 
     # Show causal mask for one sample
     sample_idx = 1  # Audio 2
-    print(f"\nCausal mask for Audio {sample_idx+1} (length={audio_lengths[sample_idx]}):")
+    print(
+        f"\nCausal mask for Audio {sample_idx + 1} (length={audio_lengths[sample_idx]}):"
+    )
     causal_single = causal_mask[sample_idx, 0, :, :]
 
     # Print with row/column headers
@@ -86,7 +88,7 @@ def print_mask_demo():
     print("\nDownsampled mask values:")
     for i in range(len(audio_lengths)):
         mask_1d = downsampled_non_causal[i, 0, 0, :]
-        print(f"Audio {i+1}: {mask_1d}")
+        print(f"Audio {i + 1}: {mask_1d}")
 
     # Show the relationship between positions
     print("\n" + "=" * 40)
@@ -94,10 +96,10 @@ def print_mask_demo():
     print("=" * 40)
 
     for i in range(len(audio_lengths)):
-        print(f"\nAudio {i+1} (original length: {audio_lengths[i]}):")
+        print(f"\nAudio {i + 1} (original length: {audio_lengths[i]}):")
         padding_positions = max_length - audio_lengths[i]
-        print(f"  Padding positions: 0 to {padding_positions-1}")
-        print(f"  Valid positions: {padding_positions} to {max_length-1}")
+        print(f"  Padding positions: 0 to {padding_positions - 1}")
+        print(f"  Valid positions: {padding_positions} to {max_length - 1}")
 
         # Show the actual data with positions
         seq = padded_audio[i]
@@ -112,6 +114,7 @@ def print_mask_demo():
         for j in range(max_length):
             print(f"{'T':4}" if mask[j] else f"{'F':4}", end="")
         print()
+
 
 if __name__ == "__main__":
     print_mask_demo()

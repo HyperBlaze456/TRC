@@ -1,4 +1,3 @@
-
 from flax import nnx
 import jax
 import jax.numpy as jnp
@@ -7,15 +6,17 @@ import jax.numpy as jnp
 class STFTDiscriminator(nnx.Module):
     """Multi-resolution STFT discriminator. Proposed from SoundStream, used in DAC too."""
 
-    def __init__(self,
-                 fft_sizes: list[int] = (2048, 1024, 512),
-                 hop_lengths: list[int] | None = None,
-                 win_lengths: list[int] | None = None,
-                 channels: list[int] = (32, 64, 128, 256, 512),
-                 kernel_size: tuple[int, int] = (3, 9),
-                 strides: tuple[int, int] = (1, 2),
-                 padding: str = "SAME",
-                 rngs: nnx.Rngs = None):
+    def __init__(
+        self,
+        fft_sizes: list[int] = (2048, 1024, 512),
+        hop_lengths: list[int] | None = None,
+        win_lengths: list[int] | None = None,
+        channels: list[int] = (32, 64, 128, 256, 512),
+        kernel_size: tuple[int, int] = (3, 9),
+        strides: tuple[int, int] = (1, 2),
+        padding: str = "SAME",
+        rngs: nnx.Rngs = None,
+    ):
         if rngs is None:
             rngs = nnx.Rngs(0)
 
@@ -30,15 +31,11 @@ class STFTDiscriminator(nnx.Module):
                 kernel_size=kernel_size,
                 strides=strides,
                 padding=padding,
-                rngs=rngs
+                rngs=rngs,
             )
             self.discriminators.append(disc)
 
-    def _stft(self,
-              x: jax.Array,
-              fft_size: int,
-              hop: int,
-              win: int) -> jax.Array:
+    def _stft(self, x: jax.Array, fft_size: int, hop: int, win: int) -> jax.Array:
         """Return complex STFT with shape [B, F, T_f]."""
         if x.ndim == 3:
             x = jnp.squeeze(x, -1)  # [B, T]
@@ -60,20 +57,23 @@ class STFTDiscriminator(nnx.Module):
         """Zero‑pad each [B, 2, F, T] to common size and stack on axis‑0."""
         f_max = max(t.shape[2] for t in feats)
         t_max = max(t.shape[3] for t in feats)
-        padded = [jnp.pad(f,
-                          ((0, 0), (0, 0),
-                           (0, f_max - f.shape[2]),
-                           (0, t_max - f.shape[3])))
-                  for f in feats]
+        padded = [
+            jnp.pad(
+                f, ((0, 0), (0, 0), (0, f_max - f.shape[2]), (0, t_max - f.shape[3]))
+            )
+            for f in feats
+        ]
         return jnp.stack(padded, 0)
 
-    def __call__(self, x: jax.Array, *, training: bool = True) -> tuple[list[jax.Array], list[list[jax.Array]]]:
+    def __call__(
+        self, x: jax.Array, *, training: bool = True
+    ) -> tuple[list[jax.Array], list[list[jax.Array]]]:
         outputs = []
         all_features = []
 
-        for i, (fft, hop, win) in enumerate(zip(self.fft_sizes,
-                                                self.hop_lengths,
-                                                self.win_lengths, strict=False)):
+        for i, (fft, hop, win) in enumerate(
+            zip(self.fft_sizes, self.hop_lengths, self.win_lengths, strict=False)
+        ):
             # Compute STFT
             spec = self._stft(x, fft, hop, win)
 
@@ -91,31 +91,36 @@ class STFTDiscriminator(nnx.Module):
 class STFTResolutionDiscriminator(nnx.Module):
     """2D Conv discriminator for a single STFT resolution (no batch norm)."""
 
-    def __init__(self,
-                 channels: list[int],
-                 kernel_size: tuple[int, int],
-                 strides: tuple[int, int],
-                 padding: str,
-                 rngs: nnx.Rngs):
+    def __init__(
+        self,
+        channels: list[int],
+        kernel_size: tuple[int, int],
+        strides: tuple[int, int],
+        padding: str,
+        rngs: nnx.Rngs,
+    ):
         self.convs = []
         c_in = 2  # magnitude and phase channels
 
         for c_out in channels:
-            conv = nnx.Conv(c_in, c_out,
-                            kernel_size=kernel_size,
-                            strides=strides,
-                            padding=padding,
-                            rngs=rngs)
+            conv = nnx.Conv(
+                c_in,
+                c_out,
+                kernel_size=kernel_size,
+                strides=strides,
+                padding=padding,
+                rngs=rngs,
+            )
             self.convs.append(conv)
             c_in = c_out
 
-        self.out_conv = nnx.Conv(c_in, 1,
-                                 kernel_size=kernel_size,
-                                 strides=1,
-                                 padding=padding,
-                                 rngs=rngs)
+        self.out_conv = nnx.Conv(
+            c_in, 1, kernel_size=kernel_size, strides=1, padding=padding, rngs=rngs
+        )
 
-    def __call__(self, x: jax.Array, *, training: bool) -> tuple[jax.Array, list[jax.Array]]:
+    def __call__(
+        self, x: jax.Array, *, training: bool
+    ) -> tuple[jax.Array, list[jax.Array]]:
         # Input must be in the shape of [B, T_f, F, 2]. That 2 is the channel.
         # Apply conv layers with ELU activation
         features = []

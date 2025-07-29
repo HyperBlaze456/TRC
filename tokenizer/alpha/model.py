@@ -16,14 +16,14 @@ class SpeechTokenizer(nnx.Module):
     """
 
     def __init__(
-            self,
-            hidden_size: int = 512,
-            encoder_depth: int = 4,
-            encoder_heads: int = 8,
-            phoneme_codebook_size: int = 100,
-            bsq_spherical_dim: int = 256,
-            decoder_output_48khz: bool = False,
-            rngs: nnx.Rngs = None,
+        self,
+        hidden_size: int = 512,
+        encoder_depth: int = 4,
+        encoder_heads: int = 8,
+        phoneme_codebook_size: int = 100,
+        bsq_spherical_dim: int = 256,
+        decoder_output_48khz: bool = False,
+        rngs: nnx.Rngs = None,
     ):
         """
         Args:
@@ -92,12 +92,29 @@ class SpeechTokenizer(nnx.Module):
         encoder_output = self.encoder(x, mask=mask)
 
         # Quantize with phoneme VQ + acoustic BSQ - now returns 7 values
-        quantized, phoneme_indices, acoustic_codes, phoneme_logits, vq_quantized, bsq_quantized, vq_residual = self.quantizer(encoder_output)
+        (
+            quantized,
+            phoneme_indices,
+            acoustic_codes,
+            phoneme_logits,
+            vq_quantized,
+            bsq_quantized,
+            vq_residual,
+        ) = self.quantizer(encoder_output)
 
         # Decode back to audio
         reconstructed = self.decoder(quantized)
 
-        return reconstructed, phoneme_indices, acoustic_codes, encoder_output, phoneme_logits, vq_quantized, bsq_quantized, vq_residual
+        return (
+            reconstructed,
+            phoneme_indices,
+            acoustic_codes,
+            encoder_output,
+            phoneme_logits,
+            vq_quantized,
+            bsq_quantized,
+            vq_residual,
+        )
 
     def encode(self, x: jax.Array, mask: jax.Array = None):
         """Encode audio to discrete tokens.

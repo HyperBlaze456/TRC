@@ -4,22 +4,24 @@ from jax import jit, vmap
 from typing import Literal
 import functools
 
+
 class MelSpectrogramJAX:
     """JAX-based Mel Spectrogram computation with JIT and parallel processing support."""
+
     def __init__(
         self,
         sample_rate: int = 22050,
         n_fft: int = 2048,
         hop_length: int = 512,
         win_length: int | None = None,
-        window: Literal['hann', 'hamming', 'blackman', 'bartlett', 'kaiser'] = 'hann',
+        window: Literal["hann", "hamming", "blackman", "bartlett", "kaiser"] = "hann",
         n_mels: int = 128,
         fmin: float = 0.0,
         fmax: float | None = None,
         power: float = 2.0,
         center: bool = True,
-        pad_mode: str = 'reflect',
-        norm: Literal['slaney'] | None = None,
+        pad_mode: str = "reflect",
+        norm: Literal["slaney"] | None = None,
         htk: bool = False,
     ):
         """
@@ -60,15 +62,15 @@ class MelSpectrogramJAX:
 
     def _get_window(self) -> jax.Array:
         """Generate window function."""
-        if self.window == 'hann':
+        if self.window == "hann":
             return jnp.hanning(self.win_length)
-        elif self.window == 'hamming':
+        elif self.window == "hamming":
             return jnp.hamming(self.win_length)
-        elif self.window == 'blackman':
+        elif self.window == "blackman":
             return jnp.blackman(self.win_length)
-        elif self.window == 'bartlett':
+        elif self.window == "bartlett":
             return jnp.bartlett(self.win_length)
-        elif self.window == 'kaiser':
+        elif self.window == "kaiser":
             return jnp.kaiser(self.win_length, 8.0)
         else:
             raise ValueError(f"Unknown window type: {self.window}")
@@ -89,7 +91,7 @@ class MelSpectrogramJAX:
             mels = jnp.where(
                 frequencies < min_log_hz,
                 (frequencies - f_min) / f_sp,
-                min_log_mel + jnp.log(frequencies / min_log_hz) / logstep
+                min_log_mel + jnp.log(frequencies / min_log_hz) / logstep,
             )
             return mels
 
@@ -97,7 +99,7 @@ class MelSpectrogramJAX:
     def mel_to_hz(self, mels: jax.Array) -> jax.Array:
         """Convert Mel scale to Hz."""
         if self.htk:
-            return 700.0 * (10.0**(mels / 2595.0) - 1.0)
+            return 700.0 * (10.0 ** (mels / 2595.0) - 1.0)
         else:
             # Slaney's formula
             f_min = 0.0
@@ -109,7 +111,7 @@ class MelSpectrogramJAX:
             freqs = jnp.where(
                 mels < min_log_mel,
                 f_min + f_sp * mels,
-                min_log_hz * jnp.exp(logstep * (mels - min_log_mel))
+                min_log_hz * jnp.exp(logstep * (mels - min_log_mel)),
             )
             return freqs
 
@@ -144,8 +146,8 @@ class MelSpectrogramJAX:
             mel_basis = mel_basis.at[i].set(jnp.minimum(rising, falling))
 
         # Normalize
-        if self.norm == 'slaney':
-            enorm = 2.0 / (hz_points[2:self.n_mels+2] - hz_points[:self.n_mels])
+        if self.norm == "slaney":
+            enorm = 2.0 / (hz_points[2 : self.n_mels + 2] - hz_points[: self.n_mels])
             mel_basis = mel_basis * enorm[:, None]
 
         return mel_basis
@@ -155,10 +157,10 @@ class MelSpectrogramJAX:
         """Pad signal for centered STFT."""
         if self.center:
             pad_length = self.n_fft // 2
-            if self.pad_mode == 'reflect':
-                return jnp.pad(signal, pad_length, mode='reflect')
-            elif self.pad_mode == 'constant':
-                return jnp.pad(signal, pad_length, mode='constant')
+            if self.pad_mode == "reflect":
+                return jnp.pad(signal, pad_length, mode="reflect")
+            elif self.pad_mode == "constant":
+                return jnp.pad(signal, pad_length, mode="constant")
             else:
                 return jnp.pad(signal, pad_length, mode=self.pad_mode)
         return signal
@@ -167,7 +169,7 @@ class MelSpectrogramJAX:
     def _stft_single_frame(self, frame: jax.Array) -> jax.Array:
         """Compute FFT for a single frame."""
         # Apply window
-        windowed = frame[:self.win_length] * self.window_func
+        windowed = frame[: self.win_length] * self.window_func
 
         # Pad to n_fft if necessary
         if self.win_length < self.n_fft:
@@ -223,7 +225,7 @@ class MelSpectrogramJAX:
         # Convert to magnitude/power spectrogram
         magnitude = jnp.abs(stft_matrix)
         if self.power != 1.0:
-            magnitude = magnitude ** self.power
+            magnitude = magnitude**self.power
 
         # Apply mel filterbank
         mel_spec = jnp.dot(self.mel_basis, magnitude)
@@ -231,7 +233,9 @@ class MelSpectrogramJAX:
         return mel_spec
 
     @functools.partial(jit, static_argnums=(0,))
-    def compute_log_mel(self, signal: jax.Array, ref: float = 1.0, amin: float = 1e-10) -> jax.Array:
+    def compute_log_mel(
+        self, signal: jax.Array, ref: float = 1.0, amin: float = 1e-10
+    ) -> jax.Array:
         """
         Compute log-scaled Mel spectrogram.
 

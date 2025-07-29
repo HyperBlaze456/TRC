@@ -4,7 +4,6 @@ This file tests the loss functions with synthetic data to check for bugs and ens
 all shapes and computations work correctly.
 """
 
-
 import jax
 import jax.numpy as jnp
 
@@ -19,14 +18,14 @@ from tokenizer.previous_things.loss import (
 def create_test_data(
     batch_size: int = 4,
     audio_length: int = 24000,  # 1 second at 24kHz
-    encoder_length: int = 50,   # 50Hz features
+    encoder_length: int = 50,  # 50Hz features
     hidden_dim: int = 256,
     vocab_size: int = 100,
     num_discriminators: int = 3,
-    num_disc_layers: int = 4
+    num_disc_layers: int = 4,
 ) -> dict:
     """Create synthetic test data with appropriate shapes.
-    
+
     Args:
         batch_size: Batch size
         audio_length: Audio sequence length
@@ -35,7 +34,7 @@ def create_test_data(
         vocab_size: Phoneme vocabulary size
         num_discriminators: Number of discriminators
         num_disc_layers: Number of layers per discriminator
-    
+
     Returns:
         Dictionary containing all test data
     """
@@ -48,21 +47,33 @@ def create_test_data(
     target_audio = jax.random.normal(keys[1], (batch_size, audio_length, 1))
 
     # Encoder outputs
-    encoder_output = jax.random.normal(keys[2], (batch_size, encoder_length, hidden_dim))
-    phoneme_quantized = jax.random.normal(keys[3], (batch_size, encoder_length, hidden_dim))
+    encoder_output = jax.random.normal(
+        keys[2], (batch_size, encoder_length, hidden_dim)
+    )
+    phoneme_quantized = jax.random.normal(
+        keys[3], (batch_size, encoder_length, hidden_dim)
+    )
 
     # Residual for BSQ
     residual = jax.random.normal(keys[4], (batch_size, encoder_length, hidden_dim))
-    residual_quantized = jax.random.normal(keys[5], (batch_size, encoder_length, hidden_dim))
+    residual_quantized = jax.random.normal(
+        keys[5], (batch_size, encoder_length, hidden_dim)
+    )
 
     # Phoneme indices (discrete values)
-    phoneme_indices = jax.random.randint(keys[6], (batch_size, encoder_length), 0, vocab_size)
+    phoneme_indices = jax.random.randint(
+        keys[6], (batch_size, encoder_length), 0, vocab_size
+    )
 
     # Phoneme targets and lengths
     max_target_len = 30
-    phoneme_targets = jax.random.randint(keys[7], (batch_size, max_target_len), 0, vocab_size)
+    phoneme_targets = jax.random.randint(
+        keys[7], (batch_size, max_target_len), 0, vocab_size
+    )
     target_lengths = jax.random.randint(keys[8], (batch_size,), 10, max_target_len)
-    encoder_lengths = jnp.full((batch_size,), encoder_length)  # Full length for simplicity
+    encoder_lengths = jnp.full(
+        (batch_size,), encoder_length
+    )  # Full length for simplicity
 
     # Phoneme codebook
     phoneme_codebook = jax.random.normal(keys[9], (vocab_size, hidden_dim))
@@ -72,7 +83,7 @@ def create_test_data(
     disc_outputs_real = []
     for i in range(num_discriminators):
         # Each discriminator may have different output shape
-        disc_length = encoder_length // (2 ** i)  # Progressively smaller
+        disc_length = encoder_length // (2**i)  # Progressively smaller
         disc_outputs_fake.append(
             jax.random.normal(keys[10 + i], (batch_size, disc_length))
         )
@@ -89,7 +100,7 @@ def create_test_data(
         for j in range(num_disc_layers):
             # Feature maps get smaller deeper in the network
             feat_length = encoder_length // (2 ** (i + j // 2))
-            feat_dim = hidden_dim // (2 ** j)
+            feat_dim = hidden_dim // (2**j)
 
             fake_features.append(
                 jax.random.normal(keys[16], (batch_size, feat_length, feat_dim))
@@ -104,8 +115,8 @@ def create_test_data(
     # Mask (optional) - using left padding
     mask = jnp.ones((batch_size, 1, 1, audio_length), dtype=jnp.bool_)
     # Add some padding to test masking
-    mask = mask.at[0, :, :, -audio_length//4:].set(False)
-    mask = mask.at[1, :, :, -audio_length//3:].set(False)
+    mask = mask.at[0, :, :, -audio_length // 4 :].set(False)
+    mask = mask.at[1, :, :, -audio_length // 3 :].set(False)
 
     return {
         "pred_audio": pred_audio,
@@ -123,7 +134,7 @@ def create_test_data(
         "disc_outputs_real": disc_outputs_real,
         "disc_features_real": disc_features_real,
         "disc_features_fake": disc_features_fake,
-        "mask": mask
+        "mask": mask,
     }
 
 
@@ -166,7 +177,7 @@ def test_generator_loss():
             disc_features_real=data["disc_features_real"],
             disc_features_fake=data["disc_features_fake"],
             mask=data["mask"],
-            config=config
+            config=config,
         )
 
         print("✓ Generator loss with mask computed successfully")
@@ -193,7 +204,7 @@ def test_generator_loss():
             disc_features_real=data["disc_features_real"],
             disc_features_fake=data["disc_features_fake"],
             mask=None,
-            config=config
+            config=config,
         )
 
         print("\n✓ Generator loss without mask computed successfully")
@@ -221,7 +232,7 @@ def test_discriminator_loss():
         d_loss_hinge, losses_hinge = compute_discriminator_loss(
             disc_outputs_real=data["disc_outputs_real"],
             disc_outputs_fake=data["disc_outputs_fake"],
-            loss_type="hinge"
+            loss_type="hinge",
         )
 
         print("✓ Discriminator hinge loss computed successfully")
@@ -235,7 +246,7 @@ def test_discriminator_loss():
         d_loss_lsgan, losses_lsgan = compute_discriminator_loss(
             disc_outputs_real=data["disc_outputs_real"],
             disc_outputs_fake=data["disc_outputs_fake"],
-            loss_type="lsgan"
+            loss_type="lsgan",
         )
 
         print("\n✓ Discriminator LSGAN loss computed successfully")
@@ -277,7 +288,7 @@ def test_shape_compatibility():
                 disc_outputs_fake=data["disc_outputs_fake"],
                 disc_features_real=data["disc_features_real"],
                 disc_features_fake=data["disc_features_fake"],
-                mask=data["mask"]
+                mask=data["mask"],
             )
             print(f"    ✓ Batch size {batch_size} works correctly")
         except Exception as e:
@@ -285,8 +296,12 @@ def test_shape_compatibility():
 
     # Test different sequence lengths
     for audio_length, encoder_length in [(12000, 25), (48000, 100)]:
-        print(f"\n  Testing audio_length={audio_length}, encoder_length={encoder_length}...")
-        data = create_test_data(audio_length=audio_length, encoder_length=encoder_length)
+        print(
+            f"\n  Testing audio_length={audio_length}, encoder_length={encoder_length}..."
+        )
+        data = create_test_data(
+            audio_length=audio_length, encoder_length=encoder_length
+        )
 
         try:
             total_loss, _ = compute_generator_loss(
@@ -304,7 +319,7 @@ def test_shape_compatibility():
                 disc_outputs_fake=data["disc_outputs_fake"],
                 disc_features_real=data["disc_features_real"],
                 disc_features_fake=data["disc_features_fake"],
-                mask=None  # No mask for simplicity
+                mask=None,  # No mask for simplicity
             )
             print("    ✓ Sequence lengths work correctly")
         except Exception as e:
@@ -336,11 +351,13 @@ def test_edge_cases():
             disc_outputs_fake=data["disc_outputs_fake"],
             disc_features_real=data["disc_features_real"],
             disc_features_fake=data["disc_features_fake"],
-            mask=None
+            mask=None,
         )
         print("✓ Small value test passed")
         if not jnp.isfinite(total_loss):
-            print(f"  ⚠ Warning: Total loss is not finite with small values: {total_loss}")
+            print(
+                f"  ⚠ Warning: Total loss is not finite with small values: {total_loss}"
+            )
     except Exception as e:
         print(f"✗ Small value test failed: {e!s}")
 
@@ -365,7 +382,7 @@ def test_edge_cases():
             disc_outputs_fake=data["disc_outputs_fake"],
             disc_features_real=data["disc_features_real"],
             disc_features_fake=data["disc_features_fake"],
-            mask=None
+            mask=None,
         )
         print("  ⚠ Mismatched shapes did not raise error (unexpected)")
     except Exception as e:

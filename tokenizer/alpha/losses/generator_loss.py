@@ -17,18 +17,15 @@ from tokenizer.utils.mel import MelSpectrogramJAX
 # Reconstruction Losses (Time Domain)
 # ============================================================================
 
-def l1_loss(
-    predictions: jax.Array,
-    targets: jax.Array,
-    mask: jax.Array
-) -> jax.Array:
+
+def l1_loss(predictions: jax.Array, targets: jax.Array, mask: jax.Array) -> jax.Array:
     """L1 loss with masking.
-    
+
     Args:
         predictions: Predicted audio [B, T, C]
         targets: Target audio [B, T, C]
         mask: Padding mask [B, T] where True = valid
-        
+
     Returns:
         Scalar L1 loss
     """
@@ -40,18 +37,14 @@ def l1_loss(
     return jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
 
 
-def l2_loss(
-    predictions: jax.Array,
-    targets: jax.Array,
-    mask: jax.Array
-) -> jax.Array:
+def l2_loss(predictions: jax.Array, targets: jax.Array, mask: jax.Array) -> jax.Array:
     """L2 (MSE) loss with masking.
-    
+
     Args:
         predictions: Predicted audio [B, T, C]
         targets: Target audio [B, T, C]
         mask: Padding mask [B, T] where True = valid
-        
+
     Returns:
         Scalar L2 loss
     """
@@ -69,27 +62,20 @@ def l2_loss(
 
 # Pre-initialize mel spectrogram for 24kHz
 mel_transform_24k = MelSpectrogramJAX(
-    sample_rate=24000,
-    n_fft=1024,
-    hop_length=256,
-    n_mels=128,
-    fmin=0.0,
-    fmax=12000.0
+    sample_rate=24000, n_fft=1024, hop_length=256, n_mels=128, fmin=0.0, fmax=12000.0
 )
 
 
 def mel_spectrogram_loss(
-    predictions: jax.Array,
-    targets: jax.Array,
-    mask: jax.Array
+    predictions: jax.Array, targets: jax.Array, mask: jax.Array
 ) -> jax.Array:
     """Mel-spectrogram L1 loss for perceptual quality.
-    
+
     Args:
         predictions: Predicted audio [B, T]
         targets: Target audio [B, T]
         mask: Padding mask [B, T] where True = valid
-        
+
     Returns:
         Scalar mel-spectrogram loss
     """
@@ -122,22 +108,23 @@ def mel_spectrogram_loss(
 # Multi-Resolution STFT Losses
 # ============================================================================
 
+
 def stft_loss(
     predictions: jax.Array,
     targets: jax.Array,
     mask: jax.Array,
     n_fft: int,
-    hop_length: int
+    hop_length: int,
 ) -> tuple[jax.Array, jax.Array]:
     """Single-resolution STFT loss (spectral convergence + log magnitude).
-    
+
     Args:
         predictions: Predicted audio [B, T]
         targets: Target audio [B, T]
         mask: Padding mask [B, T] where True = valid
         n_fft: FFT size
         hop_length: Hop length
-        
+
     Returns:
         spectral_convergence: Relative spectral error
         log_magnitude: Absolute log magnitude error
@@ -182,17 +169,15 @@ stft_loss_2048 = partial(stft_loss, n_fft=2048, hop_length=512)
 
 
 def multi_resolution_stft_loss(
-    predictions: jax.Array,
-    targets: jax.Array,
-    mask: jax.Array
+    predictions: jax.Array, targets: jax.Array, mask: jax.Array
 ) -> tuple[jax.Array, jax.Array]:
     """Multi-resolution STFT loss with fixed resolutions.
-    
+
     Args:
         predictions: Predicted audio [B, T]
         targets: Target audio [B, T]
         mask: Padding mask [B, T] where True = valid
-        
+
     Returns:
         total_sc: Total spectral convergence loss
         total_lm: Total log magnitude loss
@@ -213,20 +198,18 @@ def multi_resolution_stft_loss(
 # Quantization Commitment Losses
 # ============================================================================
 
+
 def vq_commitment_loss(
-    encoder_output: jax.Array,
-    quantized: jax.Array,
-    mask: jax.Array,
-    beta: float = 0.1
+    encoder_output: jax.Array, quantized: jax.Array, mask: jax.Array, beta: float = 0.1
 ) -> jax.Array:
     """VQ commitment loss for phoneme quantizer.
-    
+
     Args:
         encoder_output: Output before quantization [B, T, D]
         quantized: Quantized output [B, T, D]
         mask: Encoder mask [B, T] where True = valid
         beta: Commitment weight
-        
+
     Returns:
         Scalar commitment loss
     """
@@ -239,19 +222,16 @@ def vq_commitment_loss(
 
 
 def bsq_commitment_loss(
-    residual: jax.Array,
-    quantized: jax.Array,
-    mask: jax.Array,
-    gamma: float = 1.0
+    residual: jax.Array, quantized: jax.Array, mask: jax.Array, gamma: float = 1.0
 ) -> jax.Array:
     """BSQ commitment loss for residual quantizer.
-    
+
     Args:
         residual: Residual before quantization [B, T, D]
         quantized: Quantized residual [B, T, D]
         mask: Encoder mask [B, T] where True = valid
         gamma: Commitment weight
-        
+
     Returns:
         Scalar commitment loss
     """
@@ -267,12 +247,13 @@ def bsq_commitment_loss(
 # Adversarial Losses
 # ============================================================================
 
+
 def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
     """LSGAN generator adversarial loss.
-    
+
     Args:
         disc_outputs: List of discriminator outputs for generated samples
-        
+
     Returns:
         Scalar adversarial loss
     """
@@ -285,10 +266,10 @@ def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
 
 def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
     """Hinge generator adversarial loss.
-    
+
     Args:
         disc_outputs: List of discriminator outputs for generated samples
-        
+
     Returns:
         Scalar adversarial loss
     """
@@ -300,15 +281,14 @@ def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
 
 
 def feature_matching_loss(
-    real_features: list[list[jax.Array]],
-    fake_features: list[list[jax.Array]]
+    real_features: list[list[jax.Array]], fake_features: list[list[jax.Array]]
 ) -> jax.Array:
     """Feature matching loss for training stability.
-    
+
     Args:
         real_features: Features from discriminators processing real audio
         fake_features: Features from discriminators processing fake audio
-        
+
     Returns:
         Scalar feature matching loss
     """
@@ -327,6 +307,7 @@ def feature_matching_loss(
 # ============================================================================
 # Combined Generator Loss
 # ============================================================================
+
 
 def compute_generator_loss_base(
     pred_audio: jax.Array,
@@ -350,10 +331,10 @@ def compute_generator_loss_base(
     w_vq_commit: float = 0.1,
     w_bsq_commit: float = 1.0,
     w_adversarial: float = 1.0,
-    w_feature_match: float = 10.0
+    w_feature_match: float = 10.0,
 ) -> tuple[jax.Array, dict[str, jax.Array]]:
     """Compute all generator losses with DAC-style weighting.
-    
+
     Args:
         pred_audio: Reconstructed audio [B, T, C]
         target_audio: Original audio [B, T, C]
@@ -368,7 +349,7 @@ def compute_generator_loss_base(
         encoder_mask: Encoder-level mask [B, T'] where True = valid
         adversarial_loss_fn: Function for adversarial loss
         w_*: Loss weights
-        
+
     Returns:
         total_loss: Combined scalar loss
         metrics: Dictionary of individual losses
@@ -389,9 +370,7 @@ def compute_generator_loss_base(
     )
 
     # Quantization losses
-    vq_commit = vq_commitment_loss(
-        encoder_output, vq_quantized, encoder_mask, beta=1.0
-    )
+    vq_commit = vq_commitment_loss(encoder_output, vq_quantized, encoder_mask, beta=1.0)
     bsq_commit = bsq_commitment_loss(
         vq_residual, bsq_quantized, encoder_mask, gamma=1.0
     )
@@ -402,15 +381,15 @@ def compute_generator_loss_base(
 
     # Combine all losses
     total_loss = (
-        w_l1 * l1 +
-        w_l2 * l2 +
-        w_mel * mel +
-        w_stft_sc * stft_sc +
-        w_stft_lm * stft_lm +
-        w_vq_commit * vq_commit +
-        w_bsq_commit * bsq_commit +
-        w_adversarial * adversarial +
-        w_feature_match * feature_match
+        w_l1 * l1
+        + w_l2 * l2
+        + w_mel * mel
+        + w_stft_sc * stft_sc
+        + w_stft_lm * stft_lm
+        + w_vq_commit * vq_commit
+        + w_bsq_commit * bsq_commit
+        + w_adversarial * adversarial
+        + w_feature_match * feature_match
     )
 
     metrics = {
@@ -423,7 +402,7 @@ def compute_generator_loss_base(
         "bsq_commit": bsq_commit,
         "adversarial": adversarial,
         "feature_match": feature_match,
-        "total": total_loss
+        "total": total_loss,
     }
 
     return total_loss, metrics
@@ -431,11 +410,9 @@ def compute_generator_loss_base(
 
 # Create versions with static adversarial loss functions
 compute_generator_loss_lsgan = partial(
-    compute_generator_loss_base,
-    adversarial_loss_fn=adversarial_g_loss_lsgan
+    compute_generator_loss_base, adversarial_loss_fn=adversarial_g_loss_lsgan
 )
 
 compute_generator_loss_hinge = partial(
-    compute_generator_loss_base,
-    adversarial_loss_fn=adversarial_g_loss_hinge
+    compute_generator_loss_base, adversarial_loss_fn=adversarial_g_loss_hinge
 )

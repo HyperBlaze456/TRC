@@ -14,19 +14,19 @@ from train import TrainingConfig, train
 if __name__ == "__main__":
     # Test with progressively smaller batch sizes
     batch_sizes = [8, 4, 2, 1]
-    
+
     for batch_size in batch_sizes:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Testing with batch size: {batch_size}")
-        print(f"{'='*60}\n")
-        
+        print(f"{'=' * 60}\n")
+
         config = TrainingConfig(
             batch_size=batch_size,
             use_wandb=False,  # Disable W&B for testing
             profile_first_n_steps=1,  # Just profile first step
             log_every=1,  # Log every step
         )
-        
+
         try:
             train(config)
         except Exception as e:
