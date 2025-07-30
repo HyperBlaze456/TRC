@@ -61,6 +61,10 @@ class STFTDiscriminator(nnx.Module):
         Returns:
             feature_map: Contains output features from each convolutional layer
         """
+        # Debug: log input shape and memory
+        jax.debug.print("STFT Input shape: {shape}, FFT size: {fft}",
+                       shape=x.shape, fft=self.fft_size)
+
         x = x.squeeze(-1)  # [B, T]
 
         # Returns (freqs, times, Zxx) where Zxx is complex STFT
@@ -72,7 +76,9 @@ class STFTDiscriminator(nnx.Module):
             boundary=None,
             padded=False
         )
-        #jax.debug.print(str(Zxx.shape))
+
+        jax.debug.print("STFT output shape: {shape}", shape=Zxx.shape)
+
         # Zxx shape: [B, F, T_frames]
         # Stack magnitude and phase as channels
         mag = jnp.abs(Zxx)
@@ -82,10 +88,13 @@ class STFTDiscriminator(nnx.Module):
         x = jnp.stack([mag, phase], axis=-1)  # [B, F, T_frames, 2]
         x = jnp.transpose(x, (0, 2, 1, 3))    # [B, T_frames, F, 2]
 
+        jax.debug.print("Conv input shape: {shape}", shape=x.shape)
+
         feature_map = []
-        for conv in self.convs:
+        for i, conv in enumerate(self.convs):
             x = conv(x)
             x = nnx.leaky_relu(x, negative_slope=0.1)
+            jax.debug.print("After conv{i} shape: {shape}", i=i, shape=x.shape)
             feature_map.append(x)
 
         x = self.conv_post(x)

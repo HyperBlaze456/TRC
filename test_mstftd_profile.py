@@ -25,8 +25,8 @@ def test_stft_discriminator():
         print(f"Testing {name}: fft_size={fft_size}, hop_length={hop_length}")
         print(f"{'='*50}")
         
-        # Create profiler trace
-        with jax.profiler.trace(f"/tmp/jax_trace_{name}"):
+        # Use step trace annotation instead of creating new trace
+        with jax.profiler.StepTraceAnnotation(f"test_{name}"):
             try:
                 # Create discriminator
                 disc = STFTDiscriminator(
@@ -60,12 +60,9 @@ def test_stft_discriminator():
                     print(device.memory_stats())
 
 if __name__ == "__main__":
-    # You can also use programmatic profiling
-    jax.profiler.start_trace("/tmp/jax_profile")
-    
+    # Don't start a new trace if one is already running
+    # Just run the test with annotations
     test_stft_discriminator()
     
-    jax.profiler.stop_trace()
-    
-    print("\nProfile saved to /tmp/jax_profile")
-    print("View with: tensorboard --logdir=/tmp/")
+    print("\nDebug prints will show shapes even if OOM occurs")
+    print("Profile data will be in the parent trace")
