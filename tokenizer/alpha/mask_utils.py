@@ -5,7 +5,6 @@ import jax.numpy as jnp
 def create_padding_mask(
     lengths: jax.Array,
     max_length: int,
-    causal: bool = False,
     dtype: jnp.dtype = jnp.bool_,
 ) -> jax.Array:
     """Create attention mask for padded sequences with left-padding.
@@ -17,10 +16,8 @@ def create_padding_mask(
         dtype: Data type for the mask
 
     Returns:
-        mask: Boolean mask [B, 1, 1, T] or [B, 1, T, T] where True = valid position
-              Shape is ready for attention operations
+        mask: Boolean mask [B, T] where True = valid position
     """
-    batch_size = lengths.shape[0]
 
     # Create position indices
     positions = jnp.arange(max_length)[None, :]  # [1, T]
@@ -29,24 +26,7 @@ def create_padding_mask(
     # Since we use left-padding, valid positions are at the end
     padding_mask = positions >= (max_length - lengths[:, None])  # [B, T]
 
-    if causal:
-        # Create causal mask
-        causal_mask = jnp.tril(
-            jnp.ones((max_length, max_length), dtype=dtype)
-        )  # [T, T]
-        # Combine with padding mask
-        # Expand padding_mask for broadcasting: [B, 1, T]
-        padding_mask_expanded = padding_mask[:, None, :]
-        # Final mask: [B, T, T]
-        mask = padding_mask_expanded & causal_mask[None, :, :]
-        # Reshape for attention: [B, 1, T, T]
-        mask = mask[:, None, :, :]
-    else:
-        # Just padding mask for non-causal attention
-        # Reshape to [B, 1, 1, T] for attention operations
-        mask = padding_mask[:, None, None, :]
-
-    return mask.astype(dtype)
+    return padding_mask.astype(dtype)
 
 
 def create_encoder_masks(
@@ -55,7 +35,7 @@ def create_encoder_masks(
     downsample_factor: int,
     dtype: jnp.dtype = jnp.bool_,
 ) -> tuple[jax.Array, jax.Array]:
-    """Create memory-efficient encoder masks at downsampled resolution.
+    """Create encoder masks at downsampled resolution for attention
 
     This function creates both non-causal and causal masks directly at the
     encoder resolution, avoiding the memory overhead of full-resolution causal masks.
@@ -97,37 +77,6 @@ def create_encoder_masks(
     encoder_causal_mask = padding_mask_expanded & causal_mask[None, :, :]  # [B, T', T']
 
     return encoder_mask.astype(dtype), encoder_causal_mask.astype(dtype)
-
-
-def downsample_mask(mask: jax.Array | None, downsample_factor: int) -> jax.Array | None:
-    """Downsample attention mask to match encoder output time dimension.
-
-    Args:
-        mask: Input mask [B, 1, 1, T] or [B, 1, T, T]
-        downsample_factor: How much the encoder downsamples (e.g., 480 for 24kHz->50Hz)
-
-    Returns:
-        Downsampled mask with appropriate shape
-    """
-    if mask is None:
-        return None
-
-    # Get the time dimension (last dimension)
-    T = mask.shape[-1]
-    T_down = T // downsample_factor
-
-    if mask.ndim == 4 and mask.shape[-2] == mask.shape[-1]:  # Causal mask [B, 1, T, T]
-        # For causal masks, we need to handle both dimensions
-        # Take every downsample_factor-th position
-        indices = jnp.arange(T_down) * downsample_factor
-        mask_down = mask[:, :, indices, :][:, :, :, indices]
-    else:  # Non-causal mask [B, 1, 1, T]
-        # For simple padding masks, just take every downsample_factor-th position
-        indices = jnp.arange(T_down) * downsample_factor
-        mask_down = mask[:, :, :, indices]
-
-    return mask_down
-
 
 def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
     """Extract sequence lengths from a mask.

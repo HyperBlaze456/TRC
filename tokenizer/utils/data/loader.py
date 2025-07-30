@@ -77,7 +77,7 @@ def process_audio_batch(batch):
 
     # Create padding mask (non-causal)
     padding_mask = create_padding_mask(
-        lengths=lengths, max_length=max_length, causal=False
+        lengths=lengths, max_length=max_length,
     )
 
     # Create encoder masks (both non-causal and causal)
@@ -96,7 +96,7 @@ def process_audio_batch(batch):
     return {
         "audio": padded_audio,  # [B, T, C]
         "lengths": lengths,  # [B]
-        "padding_mask": padding_mask,  # [B, 1, 1, T]
+        "padding_mask": padding_mask,  # [B, T]
         "encoder_mask": encoder_mask,  # [B, T']
         "encoder_causal_mask": encoder_causal_mask,  # [B, T', T']
         "phonemes": phoneme_indices,  # [B, L] - phoneme token indices

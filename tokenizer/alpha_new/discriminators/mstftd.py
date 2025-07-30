@@ -225,7 +225,7 @@ if __name__ == '__main__':
     rngs = nnx.Rngs(0)
 
     model = MSTFTD(rngs=rngs)
-    mock_audio = jax.random.normal(key, (32, 168_000, 1))
+    mock_audio = jax.random.normal(key, (4, 168_000, 1))
 
     # Run without JIT to see memory usage properly
     print("\nRunning MSTFTD forward pass (no JIT)...")
