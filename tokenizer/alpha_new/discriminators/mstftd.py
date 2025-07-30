@@ -67,9 +67,6 @@ class STFTDiscriminator(nnx.Module):
         Returns:
             feature_map: Contains output features from each convolutional layer
         """
-        # Debug: log input shape and memory
-        jax.debug.print("STFT Input shape: {shape}, FFT size: {fft}",
-                        shape=x.shape, fft=self.fft_size)
 
         x = x.squeeze(-1)  # [B, T]
 
@@ -94,13 +91,10 @@ class STFTDiscriminator(nnx.Module):
         x = jnp.stack([mag, phase], axis=-1)  # [B, F, T_frames, 2]
         x = jnp.transpose(x, (0, 2, 1, 3))  # [B, T_frames, F, 2]
 
-        jax.debug.print("Conv input shape: {shape}", shape=x.shape)
-
         feature_map = []
         for i, conv in enumerate(self.convs):
             x = conv(x)
             x = nnx.leaky_relu(x, negative_slope=0.1)
-            jax.debug.print("After conv{i} shape: {shape}", i=i, shape=x.shape)
             feature_map.append(x)
 
         x = self.conv_post(x)
@@ -149,25 +143,22 @@ def run_inference(model, audio):
 
 
 if __name__ == '__main__':
-    # Initialize JAX with memory profiling
     jax.config.update('jax_enable_x64', False)
 
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(0)
 
     try:
-        jax.profiler.start_trace("./profile-data")
-
+        jax.profiler.start_server(6009)
         mstftd = MSTFTD(rngs=rngs)
 
         audio = jax.random.normal(key, shape=(32, 168_000, 1))
         print(f"Testing MSTFTD with input shape: {audio.shape}")
 
-        with jax.profiler.TraceAnnotation("MSTFTD_inference"):
-            featmaps = run_inference(mstftd, audio)
 
-            # Force computation to complete
-            jax.block_until_ready(featmaps)
+        featmaps = run_inference(mstftd, audio)
+
+        jax.block_until_ready(featmaps)
 
         # Print results
         print(f"Number of resolutions: {len(featmaps)}")
@@ -182,7 +173,4 @@ if __name__ == '__main__':
         import traceback
 
         traceback.print_exc()
-    finally:
-        jax.profiler.stop_trace()
-        print("\nProfile saved to ./profile-data")
-        print("To view: tensorboard --logdir=./profile-data")
+
