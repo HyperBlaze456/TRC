@@ -152,27 +152,17 @@ if __name__ == '__main__':
     # Initialize JAX with memory profiling
     jax.config.update('jax_enable_x64', False)
 
-    # Create profile directory if it doesn't exist
-    os.makedirs("./profile-data", exist_ok=True)
-
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(0)
 
     try:
-        # Create model
+        jax.profiler.start_trace("./profile-data")
+
         mstftd = MSTFTD(rngs=rngs)
 
-        # Create input data
         audio = jax.random.normal(key, shape=(32, 168_000, 1))
         print(f"Testing MSTFTD with input shape: {audio.shape}")
 
-        # Start profiling with memory tracking
-        jax.profiler.start_trace("./profile-data", create_perfetto_trace=True)
-
-        # Warm up JIT compilation (this won't be profiled)
-        _ = run_inference(mstftd, audio)
-
-        # Run the actual profiled inference
         with jax.profiler.TraceAnnotation("MSTFTD_inference"):
             featmaps = run_inference(mstftd, audio)
 
