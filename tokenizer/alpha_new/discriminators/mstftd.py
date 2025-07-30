@@ -1,6 +1,12 @@
 from flax import nnx
 import jax
 import jax.numpy as jnp
+import os
+
+# Enable memory profiling
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.8'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+
 
 class STFTDiscriminator(nnx.Module):
     def __init__(self, fft_size: int, hop_length: int, win_length: int, rngs: nnx.Rngs):
@@ -63,7 +69,7 @@ class STFTDiscriminator(nnx.Module):
         """
         # Debug: log input shape and memory
         jax.debug.print("STFT Input shape: {shape}, FFT size: {fft}",
-                       shape=x.shape, fft=self.fft_size)
+                        shape=x.shape, fft=self.fft_size)
 
         x = x.squeeze(-1)  # [B, T]
 
@@ -86,7 +92,7 @@ class STFTDiscriminator(nnx.Module):
 
         # Transpose to [B, T_frames, F, 2] for 2D convolution
         x = jnp.stack([mag, phase], axis=-1)  # [B, F, T_frames, 2]
-        x = jnp.transpose(x, (0, 2, 1, 3))    # [B, T_frames, F, 2]
+        x = jnp.transpose(x, (0, 2, 1, 3))  # [B, T_frames, F, 2]
 
         jax.debug.print("Conv input shape: {shape}", shape=x.shape)
 
@@ -101,6 +107,7 @@ class STFTDiscriminator(nnx.Module):
         feature_map.append(x)
 
         return feature_map
+
 
 class MSTFTD(nnx.Module):
     def __init__(
@@ -134,25 +141,58 @@ class MSTFTD(nnx.Module):
 
         return feature_maps
 
+
+@nnx.jit
+def run_inference(model, audio):
+    """JIT-compiled inference function"""
+    return model(audio)
+
+
 if __name__ == '__main__':
-    jax.profiler.start_trace("./profile-data")
+    # Initialize JAX with memory profiling
+    jax.config.update('jax_enable_x64', False)
+
+    # Create profile directory if it doesn't exist
+    os.makedirs("./profile-data", exist_ok=True)
+
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(0)
+
     try:
-        # Test multi-resolution STFT discriminator
+        # Create model
         mstftd = MSTFTD(rngs=rngs)
+
+        # Create input data
         audio = jax.random.normal(key, shape=(32, 168_000, 1))
-
         print(f"Testing MSTFTD with input shape: {audio.shape}")
-        featmaps = mstftd(audio)
 
+        # Start profiling with memory tracking
+        jax.profiler.start_trace("./profile-data", create_perfetto_trace=True)
+
+        # Warm up JIT compilation (this won't be profiled)
+        _ = run_inference(mstftd, audio)
+
+        # Run the actual profiled inference
+        with jax.profiler.TraceAnnotation("MSTFTD_inference"):
+            featmaps = run_inference(mstftd, audio)
+
+            # Force computation to complete
+            jax.block_until_ready(featmaps)
+
+        # Print results
         print(f"Number of resolutions: {len(featmaps)}")
 
         for i, resolution_featmaps in enumerate(featmaps):
             print(f"\nResolution {i} (fft_size={[2048, 1024, 512][i]}):")
             print(f"  Number of feature maps: {len(resolution_featmaps)}")
             print(f"  Final output shape: {resolution_featmaps[-1].shape}")
+
     except Exception as e:
-        print(e)
+        print(f"Error occurred: {e}")
+        import traceback
+
+        traceback.print_exc()
     finally:
         jax.profiler.stop_trace()
+        print("\nProfile saved to ./profile-data")
+        print("To view: tensorboard --logdir=./profile-data")
