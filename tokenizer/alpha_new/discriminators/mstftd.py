@@ -138,17 +138,16 @@ if __name__ == '__main__':
     jax.profiler.start_trace("./profile-data")
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(0)
-
-    # Test multi-resolution STFT discriminator
-    mstftd = MSTFTD(rngs=rngs)
-    audio = jax.random.normal(key, shape=(32, 168_000, 1))
-
-    print(f"Testing MSTFTD with input shape: {audio.shape}")
-    featmaps = mstftd(audio)
-    featmaps.block_until_ready()
-
-    print(f"Number of resolutions: {len(featmaps)}")
     try:
+        # Test multi-resolution STFT discriminator
+        mstftd = MSTFTD(rngs=rngs)
+        audio = jax.random.normal(key, shape=(32, 168_000, 1))
+
+        print(f"Testing MSTFTD with input shape: {audio.shape}")
+        featmaps = mstftd(audio)
+
+        print(f"Number of resolutions: {len(featmaps)}")
+
         for i, resolution_featmaps in enumerate(featmaps):
             print(f"\nResolution {i} (fft_size={[2048, 1024, 512][i]}):")
             print(f"  Number of feature maps: {len(resolution_featmaps)}")
