@@ -143,34 +143,17 @@ def run_inference(model, audio):
 
 
 if __name__ == '__main__':
-    jax.config.update('jax_enable_x64', False)
+    options = jax.profiler.ProfileOptions()
+    options.python_tracer_level = 3
+    jax.profiler.start_trace("./profile_data")
 
     key = jax.random.PRNGKey(42)
     rngs = nnx.Rngs(0)
 
-    try:
-        jax.profiler.start_server(6009)
-        mstftd = MSTFTD(rngs=rngs)
+    model = MSTFTD(rngs=rngs)
+    mock_audio = jax.random.normal(key, (32, 168_000, 1))
 
-        audio = jax.random.normal(key, shape=(32, 168_000, 1))
-        print(f"Testing MSTFTD with input shape: {audio.shape}")
+    featmap = model(mock_audio)
+    jax.block_until_ready(featmap) # featmap list[jax.Array], considered as pytree?
 
-
-        featmaps = run_inference(mstftd, audio)
-
-        jax.block_until_ready(featmaps)
-
-        # Print results
-        print(f"Number of resolutions: {len(featmaps)}")
-
-        for i, resolution_featmaps in enumerate(featmaps):
-            print(f"\nResolution {i} (fft_size={[2048, 1024, 512][i]}):")
-            print(f"  Number of feature maps: {len(resolution_featmaps)}")
-            print(f"  Final output shape: {resolution_featmaps[-1].shape}")
-
-    except Exception as e:
-        print(f"Error occurred: {e}")
-        import traceback
-
-        traceback.print_exc()
-
+    jax.profiler.stop_trace()
