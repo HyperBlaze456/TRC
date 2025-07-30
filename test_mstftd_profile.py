@@ -3,11 +3,18 @@ import jax.numpy as jnp
 from flax import nnx
 from tokenizer.alpha_new.discriminators.mstftd import MSTFTD, STFTDiscriminator
 import jax.profiler
-
-# Enable memory profiling
 import os
-os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.8'  # Use only 80% of GPU memory
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'  # Don't preallocate memory
+import time
+
+# Enable XLA memory profiling
+os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.8'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+os.environ['XLA_PYTHON_CLIENT_ALLOCATOR'] = 'platform'
+# Enable memory profiling in XLA
+os.environ['XLA_FLAGS'] = '--xla_hlo_profile --xla_gpu_enable_memory_profile'
+# Additional profiling flags
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'  # Enable all logs
+os.environ['JAX_TRACEBACK_FILTERING'] = 'off'
 
 def test_stft_discriminator():
     key = jax.random.PRNGKey(42)
@@ -25,44 +32,100 @@ def test_stft_discriminator():
         print(f"Testing {name}: fft_size={fft_size}, hop_length={hop_length}")
         print(f"{'='*50}")
         
-        # Use step trace annotation instead of creating new trace
-        with jax.profiler.StepTraceAnnotation(f"test_{name}"):
-            try:
-                # Create discriminator
-                disc = STFTDiscriminator(
-                    fft_size=fft_size,
-                    hop_length=hop_length,
-                    win_length=win_length,
-                    rngs=rngs
-                )
+        try:
+            # Create discriminator
+            disc = STFTDiscriminator(
+                fft_size=fft_size,
+                hop_length=hop_length,
+                win_length=win_length,
+                rngs=rngs
+            )
+            
+            # Create test input
+            audio = jax.random.normal(key, shape=(32, 168_000, 1))
+            
+            # JIT compile the forward pass with memory profiling
+            @nnx.jit
+            def forward_pass(audio):
+                return disc(audio)
+            
+            # Warm up JIT compilation
+            print("Warming up JIT...")
+            _ = forward_pass(jax.random.normal(key, shape=(1, 1000, 1)))
+            
+            # Run with profiling
+            print("Running profiled forward pass...")
+            featmaps = forward_pass(audio)
+            
+            # Block until computation is done
+            jax.block_until_ready(featmaps)
+            
+            print(f"Success! Output shapes:")
+            for i, feat in enumerate(featmaps):
+                print(f"  Feature map {i}: {feat.shape}")
                 
-                # Create test input
-                audio = jax.random.normal(key, shape=(32, 168_000, 1))
-                
-                # Log device memory before computation
-                for device in jax.devices():
-                    print(f"Device {device} memory stats before:")
-                    print(device.memory_stats())
-                
-                # Run discriminator
-                with jax.profiler.StepTraceAnnotation(f"forward_{name}"):
-                    featmaps = disc(audio)
-                
-                print(f"Success! Output shapes:")
-                for i, feat in enumerate(featmaps):
-                    print(f"  Feature map {i}: {feat.shape}")
-                
-            except Exception as e:
-                print(f"Failed with error: {type(e).__name__}: {str(e)}")
-                # Memory stats might still be available
-                for device in jax.devices():
-                    print(f"Device {device} memory stats after error:")
-                    print(device.memory_stats())
+        except Exception as e:
+            print(f"Failed with error: {type(e).__name__}: {str(e)}")
+
+def test_mstftd():
+    """Test the full MSTFTD discriminator"""
+    print("\n" + "="*60)
+    print("Testing full MSTFTD discriminator")
+    print("="*60)
+    
+    key = jax.random.PRNGKey(42)
+    rngs = nnx.Rngs(0)
+    
+    # Create MSTFTD discriminator
+    mstftd = MSTFTD(rngs=rngs)
+    
+    # Test with different batch sizes to see memory usage
+    batch_sizes = [1, 2, 4, 8]
+    
+    for batch_size in batch_sizes:
+        print(f"\nTesting with batch size {batch_size}")
+        audio = jax.random.normal(key, shape=(batch_size, 48000, 1))
+        
+        @nnx.jit
+        def forward_mstftd(audio):
+            return mstftd(audio)
+        
+        try:
+            # Warm up if first iteration
+            if batch_size == 1:
+                print("Warming up JIT...")
+                _ = forward_mstftd(audio)
+                jax.block_until_ready(_)
+            
+            # Run with profiling
+            outputs = forward_mstftd(audio)
+            jax.block_until_ready(outputs)
+            
+            print(f"Success! Got {len(outputs)} output tensors")
+            
+        except Exception as e:
+            print(f"Failed with batch size {batch_size}: {e}")
+            break
 
 if __name__ == "__main__":
-    # Don't start a new trace if one is already running
-    # Just run the test with annotations
-    test_stft_discriminator()
+    # Set up profiling with memory tracking
+    print("Starting JAX profiler trace with memory profiling...")
     
-    print("\nDebug prints will show shapes even if OOM occurs")
-    print("Profile data will be in the parent trace")
+    # Use context manager for cleaner profiling
+    with jax.profiler.trace("./mstftd_profile", create_perfetto_link=False):
+        # Test individual STFT discriminators
+        test_stft_discriminator()
+        
+        # Test full MSTFTD
+        test_mstftd()
+        
+        # Force some memory activity to ensure capture
+        print("\nForcing memory activity...")
+        for i in range(3):
+            x = jax.random.normal(jax.random.PRNGKey(i), shape=(2000, 2000))
+            y = jnp.dot(x, x.T)
+            jax.block_until_ready(y)
+            time.sleep(0.1)
+    
+    print("\nProfile saved to ./mstftd_profile")
+    print("To view: tensorboard --logdir=./mstftd_profile")
