@@ -254,3 +254,13 @@ class MelSpectrogramJAX:
         log_spec -= 10.0 * jnp.log10(jnp.maximum(amin, ref))
 
         return log_spec
+
+if __name__ == "__main__":
+    mel_transform_24k = MelSpectrogramJAX(
+        sample_rate=24000, n_fft=1024, hop_length=256, n_mels=128, fmin=0.0, fmax=12000.0
+    )
+    key = jax.random.PRNGKey(42)
+    mock_audio = jax.random.normal(key, (4, 576_000))
+
+    mel_test = jax.vmap(mel_transform_24k)(mock_audio)
+    print(mel_test.shape)
