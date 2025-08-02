@@ -105,9 +105,14 @@ def single_scale_stft_loss(predictions, targets, mask, n_fft, hop_length,
     Returns:
         Scalar loss of
     """
+
+    mask_expanded = jnp.expand_dims(mask, axis=-1)
+    predictions_masked = predictions * mask_expanded
+    targets_masked = targets * mask_expanded
+
     # remove last dim for stft
-    predictions = jnp.squeeze(predictions, axis=-1)
-    targets = jnp.squeeze(targets, axis=-1)
+    predictions_squeezed = jnp.squeeze(predictions_masked, axis=-1)
+    targets_squeezed = jnp.squeeze(targets_masked, axis=-1)
 
     def _stft_fn(audio):
         # nperseg is window_length, noverlap is window_length - hop_length
@@ -123,30 +128,20 @@ def single_scale_stft_loss(predictions, targets, mask, n_fft, hop_length,
 
     vmapped_stft = jax.vmap(_stft_fn) # verify if vmap is needed?
 
-    pred_stft = vmapped_stft(predictions)  #[B, n_freqs, n_frames]
-    target_stft = vmapped_stft(targets)
+    pred_stft = vmapped_stft(predictions_squeezed)  #[B, n_freqs, n_frames]
+    target_stft = vmapped_stft(targets_squeezed)
 
     # calc magnitude
     pred_mag = jnp.abs(pred_stft)
     target_mag = jnp.abs(target_stft)
 
-    # Create frequency domain mask
-    # Resample waveform level mask to compressed post-STFT mask
-    n_frames = target_stft.shape[-1]
-    indices = jnp.arange(n_frames) * hop_length
-    # limit mask overflowing(it is for left-pad ignoring)
-    indices = jnp.minimum(indices, mask.shape[1] - 1)
-    mask_stft = mask[:, indices]  # [B, n_frames]
-    # prep for broadcasting [B, 1, n_frames]
-    mask_stft = jnp.expand_dims(mask_stft, axis=1)
-
     total_loss = 0.0
 
+    num_valid_samples = jnp.maximum(jnp.sum(mask), 1.0)
     # 1. raw magnitude L1 loss
     if mag_weight > 0:
         mag_loss = jnp.abs(pred_mag - target_mag)
-        mag_loss = jnp.sum(mag_loss * mask_stft) / jnp.maximum(jnp.sum(mask_stft), 1.0)
-        total_loss += mag_weight * mag_loss
+        total_loss += mag_weight * (jnp.sum(mag_loss) / num_valid_samples)
 
     # 2. log magnitude L1 loss
     if log_mag_weight > 0:
@@ -154,8 +149,7 @@ def single_scale_stft_loss(predictions, targets, mask, n_fft, hop_length,
         target_log_mag = jnp.log(jnp.power(target_mag, power) + eps)
 
         log_mag_loss = jnp.abs(pred_log_mag - target_log_mag)
-        log_mag_loss = jnp.sum(log_mag_loss * mask_stft) / jnp.maximum(jnp.sum(mask_stft), 1.0)
-        total_loss += log_mag_weight * log_mag_loss
+        total_loss += log_mag_weight * (jnp.sum(log_mag_loss) / num_valid_samples)
 
     return total_loss
 
@@ -178,7 +172,54 @@ def multi_scale_stft_loss(predictions, targets, mask,
 
     return total_loss
 
+def vq_commitment_loss(
+        encoder_output: jax.Array, quantized: jax.Array, mask: jax.Array, vq_weight: float = 0.25
+):
+    mask = jnp.expand_dims(mask, axis=-1)
 
+    loss = jnp.square(encoder_output - quantized)
+    loss = loss * mask
+    return vq_weight * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
+
+def bsq_commitment_loss(
+        residual: jax.Array, quantized: jax.Array, mask: jax.Array, bsq_weight: float = 1.0
+):
+    mask = jnp.expand_dims(mask, axis=-1)
+
+    loss = jnp.square(residual - quantized)
+    loss = loss * mask
+    return bsq_weight * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
+
+def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
+
+    total_loss = 0.0
+    for output in disc_outputs:
+        loss = jnp.mean(jnp.square(output - 1))
+        total_loss = total_loss + loss
+    return total_loss / len(disc_outputs)
+
+def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
+
+    total_loss = 0.0
+    for output in disc_outputs:
+        loss = -jnp.mean(output)
+        total_loss = total_loss + loss
+    return total_loss / len(disc_outputs)
+
+def feature_matching_loss(
+    real_features: list[list[jax.Array]], fake_features: list[list[jax.Array]]
+) -> jax.Array:
+
+    total_loss = 0.0
+    num_features = 0
+
+    for real_feats, fake_feats in zip(real_features, fake_features, strict=False):
+        for real_f, fake_f in zip(real_feats, fake_feats, strict=False):
+            loss = jnp.mean(jnp.abs(fake_f - jax.lax.stop_gradient(real_f)))
+            total_loss = total_loss + loss
+            num_features = num_features + 1
+
+    return total_loss / jnp.maximum(num_features, 1)
 
 if __name__ == "__main__":
     key = jax.random.PRNGKey(42)
@@ -209,7 +250,8 @@ if __name__ == "__main__":
     
     # Test with partial mask
     mask_partial = jnp.ones((4, 505440))
-    mask_partial = mask_partial.at[:, 400000:].set(0)
+    mask_partial = mask_partial.at[:, :400000].set(0)
+    print(mask_partial[0])
     stft_loss_masked = multi_scale_stft_loss(audio_fake_3d, audio_true_3d, mask_partial)
     print(f"Multi-scale STFT loss with partial mask: {stft_loss_masked}")
 
