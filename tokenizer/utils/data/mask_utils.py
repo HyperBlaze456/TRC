@@ -12,7 +12,6 @@ def create_padding_mask(
     Args:
         lengths: Array of actual sequence lengths [B]
         max_length: Maximum sequence length in the batch
-        causal: Whether to apply causal masking on top of padding mask
         dtype: Data type for the mask
 
     Returns:
@@ -22,8 +21,7 @@ def create_padding_mask(
     # Create position indices
     positions = jnp.arange(max_length)[None, :]  # [1, T]
 
-    # Create padding mask (True = valid, False = padded)
-    # Since we use left-padding, valid positions are at the end
+    # Create left-padding mask.
     padding_mask = positions >= (max_length - lengths[:, None])  # [B, T]
 
     return padding_mask.astype(dtype)
@@ -35,10 +33,9 @@ def create_encoder_masks(
     downsample_factor: int,
     dtype: jnp.dtype = jnp.bool_,
 ) -> tuple[jax.Array, jax.Array]:
-    """Create encoder masks at downsampled resolution for attention
+    """Create encoder attn mask
 
-    This function creates both non-causal and causal masks directly at the
-    encoder resolution, avoiding the memory overhead of full-resolution causal masks.
+    Creates both raw 1D positional mask and 2D causal mask.
 
     Args:
         lengths: Array of actual sequence lengths [B]
@@ -50,24 +47,16 @@ def create_encoder_masks(
         encoder_mask: Non-causal padding mask at encoder resolution [B, T']
         encoder_causal_mask: Causal mask at encoder resolution [B, T', T']
     """
-    batch_size = lengths.shape[0]
     # Use ceiling division to match causal convolution output length
     encoder_max_length = -(-max_length // downsample_factor)  # Ceiling division
 
-    # Create encoder lengths
     # A frame is valid if it contains ANY valid audio sample
     encoder_lengths = jnp.ceil(lengths / downsample_factor).astype(jnp.int32)
 
-    # Create position indices at encoder resolution
     positions = jnp.arange(encoder_max_length)[None, :]  # [1, T']
-
-    # Create padding mask at encoder resolution
     padding_mask = positions < encoder_lengths[:, None]  # [B, T']
-
-    # Non-causal mask for encoder (2D)
     encoder_mask = padding_mask  # [B, T']
 
-    # Causal mask at encoder resolution (much smaller than audio resolution)
     causal_mask = jnp.tril(
         jnp.ones((encoder_max_length, encoder_max_length), dtype=dtype)
     )  # [T', T']
@@ -87,9 +76,8 @@ def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
     Returns:
         lengths: Array of sequence lengths [B]
     """
-    # Handle different mask shapes
+    # JIT compile warning? If statements...
     if mask.ndim == 4:
-        # Take the last time dimension
         mask_1d = mask[:, 0, 0, :]  # [B, T]
     elif mask.ndim == 3:
         mask_1d = mask[:, 0, :]  # [B, T]
@@ -135,23 +123,3 @@ def pad_sequences_left(
     padded = jnp.stack(padded_list)
 
     return padded, lengths
-
-
-def combine_masks(
-    mask1: jax.Array, mask2: jax.Array, operation: str = "and"
-) -> jax.Array:
-    """Combine two masks using specified bitwise operation.
-    Will support more, probably.
-    Args:
-        mask1: First mask
-        mask2: Second mask (must have compatible shape)
-        operation: "and" or "or"
-
-    Returns:
-        Combined mask
-    """
-    if operation == "and":
-        return mask1 & mask2
-    if operation == "or":
-        return mask1 | mask2
-    raise ValueError(f"Unknown operation: {operation}")

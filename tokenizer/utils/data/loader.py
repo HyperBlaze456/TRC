@@ -10,7 +10,7 @@ from datasets import load_dataset, Audio
 from dataclasses import dataclass
 import warnings
 
-from tokenizer.alpha.mask_utils import (
+from tokenizer.utils.data.mask_utils import (
     pad_sequences_left,
     create_padding_mask,
     create_encoder_masks,
