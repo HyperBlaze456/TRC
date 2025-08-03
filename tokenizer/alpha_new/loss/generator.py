@@ -172,7 +172,7 @@ def multi_scale_stft_loss(predictions, targets, mask,
     return total_loss
 
 @partial(jax.jit, static_argnames=("vq_weight", ))
-def vq_commitment_loss(
+def vq_loss(
         encoder_output: jax.Array, quantized: jax.Array, mask: jax.Array, vq_weight: float = 0.25
 ):
     # mask must be encoder mask, not regular padding mask
@@ -180,7 +180,7 @@ def vq_commitment_loss(
     return vq_weight * loss
 
 @partial(jax.jit, static_argnames=("bsq_weight", ))
-def bsq_commitment_loss(
+def bsq_loss(
         residual: jax.Array, quantized: jax.Array, mask: jax.Array, bsq_weight: float = 1.0
 ):
     # mask must be encoder mask, not regular padding mask.
