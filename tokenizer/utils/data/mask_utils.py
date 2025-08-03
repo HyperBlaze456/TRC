@@ -91,7 +91,8 @@ def create_lengths_from_mask(mask: jax.Array) -> jax.Array:
 
 
 def pad_sequences_left(
-    sequences: list[jax.Array], max_length: int = None, pad_value: float = 0.0
+    sequences: list[jax.Array], max_length: int = None, pad_value: float = 0.0,
+    round_to_multiple: int = None
 ) -> tuple[jax.Array, jax.Array]:
     """Pad sequences with left-padding to create a batch.
 
@@ -99,6 +100,7 @@ def pad_sequences_left(
         sequences: List or array of sequences with potentially different lengths
         max_length: Target length (Recommended to use None as it infers longest sequence)
         pad_value: Value to use for padding
+        round_to_multiple: If provided, round max_length up to nearest multiple
 
     Returns:
         padded: Padded sequences [B, max_length, ...]
@@ -108,6 +110,10 @@ def pad_sequences_left(
     lengths = jnp.array([len(seq) for seq in sequences])
     if max_length is None:
         max_length = int(lengths.max())
+    
+    # Round up to nearest multiple if requested
+    if round_to_multiple is not None:
+        max_length = ((max_length + round_to_multiple - 1) // round_to_multiple) * round_to_multiple
 
         # Pad each sequence
     padded_list = []

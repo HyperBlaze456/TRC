@@ -55,11 +55,12 @@ def extract_text_language(batch):
     return {"language": batch["json"]["language"], "text": batch["json"]["text"]}
 
 
-def process_audio_batch(batch):
+def process_audio_batch(batch, sample_rate=24000):
     """Process audio batch with left-padding, create masks, and convert text to phonemes.
 
     Args:
         batch: Dataset batch containing 'mp3' audio data and text/language fields
+        sample_rate: Audio sample rate (default 24000 Hz)
 
     Returns:
         dict: Processed batch with padded audio, masks, and phoneme arrays
@@ -71,8 +72,9 @@ def process_audio_batch(batch):
     # Add channel dimension if not present (assume mono audio)
     audio_arrays = [arr[:, None] if arr.ndim == 1 else arr for arr in audio_arrays]
 
-    # Pad sequences with left-padding
-    padded_audio, lengths = pad_sequences_left(audio_arrays)
+    # Pad sequences with left-padding, rounding to nearest half-second (12000 samples at 24kHz)
+    half_second_samples = sample_rate // 2  # 12000 for 24kHz
+    padded_audio, lengths = pad_sequences_left(audio_arrays, round_to_multiple=half_second_samples)
     max_length = padded_audio.shape[1]
 
     # Create padding mask (non-causal)
@@ -117,7 +119,7 @@ def create_emilia_ds(config: AudioConfig):
     # Batch the dataset
     dataset = dataset.batch(config.batch_size)
     # Apply audio processing with padding and masks
-    dataset = dataset.map(process_audio_batch)
+    dataset = dataset.map(lambda batch: process_audio_batch(batch, sample_rate=config.sample_rate))
     # Remove unwanted columns after processing
     dataset = dataset.remove_columns(
         ["json", "mp3", "__key__", "__url__", "language", "text"]
