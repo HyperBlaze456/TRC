@@ -29,7 +29,7 @@ def l2_loss(predictions: jax.Array, targets: jax.Array, mask: jax.Array) -> jax.
     Args:
         predictions: Features from predicted(generator output) [B, T, C]
         targets: True feature extracted [B, T, C]
-        mask: Padding mask [B, T] where True = valid
+        mask: Mask [B, T] where True = valid
 
     Returns:
         Scalar L2 loss
@@ -44,7 +44,6 @@ def l2_loss(predictions: jax.Array, targets: jax.Array, mask: jax.Array) -> jax.
 mel_transform_24k = MelSpectrogramJAX(
     sample_rate=24000, n_fft=1024, hop_length=256, n_mels=128, fmin=0.0, fmax=12000.0
 )
-
 
 def mel_spectrogram_loss(
     predictions: jax.Array, targets: jax.Array, mask: jax.Array
@@ -103,7 +102,7 @@ def single_scale_stft_loss(predictions, targets, mask, n_fft, hop_length,
         eps: 1e-5 no div by zero
 
     Returns:
-        Scalar loss of
+        Scalar loss of all batches summed.
     """
 
     mask_expanded = jnp.expand_dims(mask, axis=-1)
@@ -172,26 +171,23 @@ def multi_scale_stft_loss(predictions, targets, mask,
 
     return total_loss
 
+@partial(jax.jit, static_argnames=("vq_weight", ))
 def vq_commitment_loss(
         encoder_output: jax.Array, quantized: jax.Array, mask: jax.Array, vq_weight: float = 0.25
 ):
-    mask = jnp.expand_dims(mask, axis=-1)
+    # mask must be encoder mask, not regular padding mask
+    loss = l2_loss(quantized, encoder_output, mask) # TODO: check where stop_gradient is needed.
+    return vq_weight * loss
 
-    loss = jnp.square(encoder_output - quantized)
-    loss = loss * mask
-    return vq_weight * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
-
+@partial(jax.jit, static_argnames=("bsq_weight", ))
 def bsq_commitment_loss(
         residual: jax.Array, quantized: jax.Array, mask: jax.Array, bsq_weight: float = 1.0
 ):
-    mask = jnp.expand_dims(mask, axis=-1)
-
-    loss = jnp.square(residual - quantized)
-    loss = loss * mask
-    return bsq_weight * jnp.sum(loss) / jnp.maximum(jnp.sum(mask), 1.0)
+    # mask must be encoder mask, not regular padding mask.
+    loss = l2_loss(quantized, residual, mask) # TODO: check where stop_gradient is needed.
+    return bsq_weight * loss
 
 def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
-
     total_loss = 0.0
     for output in disc_outputs:
         loss = jnp.mean(jnp.square(output - 1))
@@ -199,7 +195,6 @@ def adversarial_g_loss_lsgan(disc_outputs: list[jax.Array]) -> jax.Array:
     return total_loss / len(disc_outputs)
 
 def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
-
     total_loss = 0.0
     for output in disc_outputs:
         loss = -jnp.mean(output)
@@ -209,13 +204,12 @@ def adversarial_g_loss_hinge(disc_outputs: list[jax.Array]) -> jax.Array:
 def feature_matching_loss(
     real_features: list[list[jax.Array]], fake_features: list[list[jax.Array]]
 ) -> jax.Array:
-
     total_loss = 0.0
     num_features = 0
 
     for real_feats, fake_feats in zip(real_features, fake_features, strict=False):
         for real_f, fake_f in zip(real_feats, fake_feats, strict=False):
-            loss = jnp.mean(jnp.abs(fake_f - jax.lax.stop_gradient(real_f)))
+            loss = jnp.mean(jnp.abs(fake_f - real_f)) # TODO: check where stop_gradient is needed.
             total_loss = total_loss + loss
             num_features = num_features + 1
 
