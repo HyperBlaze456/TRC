@@ -229,7 +229,7 @@ def train_discriminator_step(
     stftd_optimizer.update(stftd_grads)
 
 
-@partial(nnx.jit, static_argnums=(10, 11))
+@partial(nnx.jit, static_argnums=(11, 12, 13))
 def train_generator_step(
         generator: SpeechTokenizer,
         gen_optimizer: nnx.Optimizer,
@@ -244,7 +244,7 @@ def train_generator_step(
         phoneme_indices: jax.Array = None,
         phoneme_mask: jax.Array = None,
         
-        use_discriminators: bool = False,
+        use_discriminators: bool = True,
         loss_type: str = "lsgan",
         config: TrainingConfig = None,
 ):
@@ -440,7 +440,7 @@ train_generator_step_pmap = nnx.pmap(
     train_generator_step,
     in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, None, None, None),  # Shard data, replicate models
     axis_name="devices",
-    static_broadcasted_argnums=(10, 11, 12)  # use_discriminators, loss_type, config are static
+    static_broadcasted_argnums=(11, 12, 13)  # use_discriminators, loss_type, config are static
 )
 
 
