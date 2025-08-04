@@ -10,8 +10,6 @@ sys.path.insert(0, str(project_root))
 
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, PartitionSpec as P, NamedSharding
-from jax.experimental import mesh_utils
 
 from flax import nnx
 import optax
@@ -522,7 +520,7 @@ def train(config: TrainingConfig):
                 generator, msd, mstftd, mpd,
                 msd_optimizer, mpd_optimizer, mstftd_optimizer,
                 audio, padding_mask, encoder_causal_mask,
-                loss_type="lsgan"
+                "lsgan"  # Pass as positional argument
             )
         
         # Generator training step
@@ -532,9 +530,9 @@ def train(config: TrainingConfig):
             msd, mstftd, mpd,
             audio, padding_mask, encoder_causal_mask, encoder_mask,
             phoneme_indices, phoneme_mask,
-            use_discriminators=use_discriminators,
-            loss_type="lsgan",
-            config=config
+            use_discriminators,  # Pass as positional argument
+            "lsgan",  # Pass as positional argument
+            config  # Pass as positional argument
         )
         
         # Simple logging
