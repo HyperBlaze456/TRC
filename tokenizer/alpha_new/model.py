@@ -88,7 +88,7 @@ class SpeechTokenizer(nnx.Module):
             vq_quantized,
             bsq_quantized,
             vq_residual,
-        ) = self.quantizer(x)
+        ) = self.quantizer(encoder_output)
 
         reconstructed = self.decoder(quantized)
 
