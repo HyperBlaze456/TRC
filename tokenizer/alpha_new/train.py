@@ -29,7 +29,7 @@ from tokenizer.utils.data.phoneme_utils import PHONEME_VOCAB_SIZE
 from tokenizer.utils.data.loader import AudioConfig, create_emilia_ds
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainingConfig:
     # Model hyperparameters
     hidden_size: int = 512
