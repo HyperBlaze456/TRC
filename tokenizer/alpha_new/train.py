@@ -420,7 +420,131 @@ def train_generator_step(
     )(generator)
     
     gen_optimizer.update(grads)
-    
-    return total_loss, loss_dict
 
+
+# Create pmap versions of training steps for data parallel training
+train_discriminator_step_pmap = nnx.pmap(
+    train_discriminator_step,
+    in_axes=(None, None, None, None, None, None, None, 0, 0, 0, None),  # Shard data, replicate models
+    axis_name="devices",
+    static_broadcasted_argnums=(10,)  # loss_type is static
+)
+
+train_generator_step_pmap = nnx.pmap(
+    train_generator_step,
+    in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, None, None, None),  # Shard data, replicate models
+    axis_name="devices",
+    static_broadcasted_argnums=(10, 11, 12)  # use_discriminators, loss_type, config are static
+)
+
+
+def shard_batch(batch, num_devices):
+    """Shard batch across devices.
+    
+    Args:
+        batch: Dictionary with keys like 'audio', 'padding_mask', etc.
+        num_devices: Number of devices to shard across
+    
+    Returns:
+        Sharded batch with first dimension split across devices
+    """
+    def shard_array(arr):
+        # Reshape to (num_devices, batch_per_device, ...)
+        batch_size = arr.shape[0]
+        if batch_size % num_devices != 0:
+            raise ValueError(f"Batch size {batch_size} not divisible by {num_devices} devices")
+        
+        batch_per_device = batch_size // num_devices
+        new_shape = (num_devices, batch_per_device) + arr.shape[1:]
+        return arr.reshape(new_shape)
+    
+    sharded_batch = {}
+    for key, value in batch.items():
+        if isinstance(value, jax.Array):
+            sharded_batch[key] = shard_array(value)
+        else:
+            sharded_batch[key] = value
+    
+    return sharded_batch
+
+
+def train(config: TrainingConfig):
+    """Main training loop with data parallel training."""
+    
+    # Setup
+    num_devices = jax.device_count()
+    print(f"Training on {num_devices} devices")
+    
+    # Initialize RNGs
+    key = jax.random.PRNGKey(config.seed)
+    key, model_key = jax.random.split(key)
+    rngs = nnx.Rngs(model_key)
+    
+    # Create models and optimizers
+    models = create_models_and_optimizers(config, rngs)
+    generator = models['generator']
+    gen_optimizer = models['gen_optimizer']
+    msd = models['msd']
+    mpd = models['mpd']
+    mstftd = models['mstftd']
+    msd_optimizer = models['msd_optimizer']
+    mpd_optimizer = models['mpd_optimizer']
+    mstftd_optimizer = models['mstftd_optimizer']
+    
+    # Create data iterator
+    data_iter = create_data_iterator(config)
+    
+    # Training loop
+    for step in range(config.total_steps):
+        # Get batch
+        batch = next(data_iter)
+        
+        # Shard batch across devices
+        sharded_batch = shard_batch(batch, num_devices)
+        
+        # Extract arrays from batch
+        audio = sharded_batch['audio']  # [num_devices, batch_per_device, T, 1]
+        padding_mask = sharded_batch['padding_mask']  # [num_devices, batch_per_device, T]
+        encoder_causal_mask = sharded_batch.get('encoder_causal_mask')  # [num_devices, batch_per_device, T', T']
+        encoder_mask = sharded_batch.get('encoder_mask')  # [num_devices, batch_per_device, T']
+        phoneme_indices = sharded_batch.get('phoneme_indices')  # Optional
+        phoneme_mask = sharded_batch.get('phoneme_mask')  # Optional
+        
+        # Discriminator training step (if enabled)
+        if step >= config.disc_start_step and step % config.disc_update_freq == 0:
+            train_discriminator_step_pmap(
+                generator, msd, mstftd, mpd,
+                msd_optimizer, mpd_optimizer, mstftd_optimizer,
+                audio, padding_mask, encoder_causal_mask,
+                loss_type="lsgan"
+            )
+        
+        # Generator training step
+        use_discriminators = step >= config.disc_start_step
+        train_generator_step_pmap(
+            generator, gen_optimizer,
+            msd, mstftd, mpd,
+            audio, padding_mask, encoder_causal_mask, encoder_mask,
+            phoneme_indices, phoneme_mask,
+            use_discriminators=use_discriminators,
+            loss_type="lsgan",
+            config=config
+        )
+        
+        # Simple logging
+        if step % 100 == 0:
+            print(f"Step {step}/{config.total_steps}")
+        
+        # Checkpointing
+        if step % config.checkpoint_every == 0 and step > 0:
+            checkpoint_path = f"{config.checkpoint_dir}/step_{step}"
+            print(f"Saving checkpoint to {checkpoint_path}")
+            # TODO: Add checkpoint saving logic using orbax
+            
+    print("Training completed!")
+
+
+if __name__ == "__main__":
+    config = TrainingConfig()
+    train(config)
 
