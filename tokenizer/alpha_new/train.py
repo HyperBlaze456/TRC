@@ -1,6 +1,12 @@
 import os
+import sys
+from pathlib import Path
 from dataclasses import dataclass
 from functools import partial
+
+# Add project root to path for relative imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import jax
 import jax.numpy as jnp
