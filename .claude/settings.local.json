@@ -7,7 +7,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:arxiv.org)",
       "Bash(find:*)",
-      "WebFetch(domain:optax.readthedocs.io)"
+      "WebFetch(domain:optax.readthedocs.io)",
+      "WebFetch(domain:flax.readthedocs.io)"
     ],
     "deny": []
   }

@@ -4,6 +4,11 @@ from pathlib import Path
 from dataclasses import dataclass
 from functools import partial
 
+# Suppress XLA compilation warnings
+os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_softmax_fusion=true'
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 # Add project root to path for relative imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -16,6 +21,7 @@ import optax
 import orbax.checkpoint as ocp
 
 from tokenizer.alpha_new.discriminators import MPD, MSD, MSTFTD
+from tokenizer.utils.metrics.wandb import init_wandb, log_generator_metrics, log_discriminator_metrics, finish_wandb
 from tokenizer.alpha_new.loss import (
     l1_loss, mel_spectrogram_loss, multi_scale_stft_loss,
     vq_loss, bsq_loss,
@@ -76,7 +82,7 @@ class TrainingConfig:
     
     # Checkpointing
     checkpoint_dir: str = "./checkpoints/speech_tokenizer"
-    checkpoint_every: int = 5000
+    checkpoint_every: int = 50 # very small, test
     
     # RNGs seed
     seed: int = 42
@@ -228,6 +234,14 @@ def train_discriminator_step(
     msd_optimizer.update(msd_grads)
     mpd_optimizer.update(mpd_grads)
     stftd_optimizer.update(stftd_grads)
+    
+    # Return loss values for logging
+    return {
+        'msd_loss': msd_loss_val,
+        'mpd_loss': mpd_loss_val,
+        'mstftd_loss': stftd_loss_val,
+        'total_disc_loss': msd_loss_val + mpd_loss_val + stftd_loss_val
+    }
 
 
 @partial(nnx.jit, static_argnums=(11, 12, 13))
@@ -428,12 +442,16 @@ def train_generator_step(
     )(generator)
     
     gen_optimizer.update(grads)
+    
+    # Return loss values for logging
+    return loss_dict
 
 
 # Create pmap versions of training steps for data parallel training
 train_discriminator_step_pmap = nnx.pmap(
     train_discriminator_step,
     in_axes=(None, None, None, None, None, None, None, 0, 0, 0, None),  # Shard data, replicate models
+    out_axes=0,  # Shard outputs across devices
     axis_name="devices",
     static_broadcasted_argnums=(10,)  # loss_type is static
 )
@@ -441,6 +459,7 @@ train_discriminator_step_pmap = nnx.pmap(
 train_generator_step_pmap = nnx.pmap(
     train_generator_step,
     in_axes=(None, None, None, None, None, 0, 0, 0, 0, 0, 0, None, None, None),  # Shard data, replicate models
+    out_axes=0,  # Shard outputs across devices
     axis_name="devices",
     static_broadcasted_argnums=(11, 12, 13)  # use_discriminators, loss_type, config are static
 )
@@ -556,6 +575,9 @@ def train(config: TrainingConfig):
     num_devices = jax.device_count()
     print(f"Training on {num_devices} devices")
     
+    # Initialize wandb
+    wandb_run = init_wandb(config, project="speech-tokenizer")
+    
     # Initialize RNGs
     key = jax.random.PRNGKey(config.seed)
     key, model_key = jax.random.split(key)
@@ -593,16 +615,19 @@ def train(config: TrainingConfig):
         
         # Discriminator training step (if enabled)
         if step >= config.disc_start_step and step % config.disc_update_freq == 0:
-            train_discriminator_step_pmap(
+            disc_losses = train_discriminator_step_pmap(
                 generator, msd, mstftd, mpd,
                 msd_optimizer, mpd_optimizer, mstftd_optimizer,
                 audio, padding_mask, encoder_causal_mask,
                 "lsgan"  # Pass as positional argument
             )
+            # Average losses across devices
+            disc_losses = jax.tree_map(lambda x: jnp.mean(x).item(), disc_losses)
+            log_discriminator_metrics(disc_losses, step)
         
         # Generator training step
         use_discriminators = step >= config.disc_start_step
-        train_generator_step_pmap(
+        gen_losses = train_generator_step_pmap(
             generator, gen_optimizer,
             msd, mstftd, mpd,
             audio, padding_mask, encoder_causal_mask, encoder_mask,
@@ -611,9 +636,12 @@ def train(config: TrainingConfig):
             "lsgan",  # Pass as positional argument
             config  # Pass as positional argument
         )
+        # Average losses across devices
+        gen_losses = jax.tree_map(lambda x: jnp.mean(x).item(), gen_losses)
+        log_generator_metrics(gen_losses, step)
         
         # Simple logging
-        if step % 100 == 0:
+        if step % 10 == 0:
             print(f"Step {step}/{config.total_steps}")
         
         # Checkpointing
@@ -634,6 +662,7 @@ def train(config: TrainingConfig):
             )
             
     print("Training completed!")
+    finish_wandb()
 
 
 if __name__ == "__main__":
