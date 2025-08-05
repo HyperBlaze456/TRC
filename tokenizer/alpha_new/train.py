@@ -472,6 +472,79 @@ def shard_batch(batch, num_devices):
     return sharded_batch
 
 
+def save_checkpoint(
+    checkpoint_path: str,
+    step: int,
+    generator: SpeechTokenizer,
+    gen_optimizer: nnx.Optimizer,
+    msd: MSD,
+    mpd: MPD,
+    mstftd: MSTFTD,
+    msd_optimizer: nnx.Optimizer,
+    mpd_optimizer: nnx.Optimizer,
+    mstftd_optimizer: nnx.Optimizer,
+):
+    """Save checkpoint using orbax."""
+    # Create checkpoint directory
+    os.makedirs(checkpoint_path, exist_ok=True)
+    
+    # Create checkpoint manager
+    ckptr = ocp.StandardCheckpointer()
+    
+    # Save models and optimizers
+    checkpoint_data = {
+        'step': step,
+        'generator': nnx.state(generator),
+        'gen_optimizer': nnx.state(gen_optimizer),
+        'msd': nnx.state(msd),
+        'mpd': nnx.state(mpd),
+        'mstftd': nnx.state(mstftd),
+        'msd_optimizer': nnx.state(msd_optimizer),
+        'mpd_optimizer': nnx.state(mpd_optimizer),
+        'mstftd_optimizer': nnx.state(mstftd_optimizer),
+    }
+    
+    ckptr.save(checkpoint_path, checkpoint_data)
+    print(f"Checkpoint saved at step {step}")
+
+
+def load_checkpoint(
+    checkpoint_path: str,
+    generator: SpeechTokenizer,
+    gen_optimizer: nnx.Optimizer,
+    msd: MSD,
+    mpd: MPD,
+    mstftd: MSTFTD,
+    msd_optimizer: nnx.Optimizer,
+    mpd_optimizer: nnx.Optimizer,
+    mstftd_optimizer: nnx.Optimizer,
+):
+    """Load checkpoint using orbax."""
+    if not os.path.exists(checkpoint_path):
+        print(f"No checkpoint found at {checkpoint_path}")
+        return 0
+    
+    # Create checkpoint manager
+    ckptr = ocp.StandardCheckpointer()
+    
+    # Load checkpoint data
+    checkpoint_data = ckptr.restore(checkpoint_path)
+    
+    # Restore model and optimizer states
+    nnx.update(generator, checkpoint_data['generator'])
+    nnx.update(gen_optimizer, checkpoint_data['gen_optimizer'])
+    nnx.update(msd, checkpoint_data['msd'])
+    nnx.update(mpd, checkpoint_data['mpd'])
+    nnx.update(mstftd, checkpoint_data['mstftd'])
+    nnx.update(msd_optimizer, checkpoint_data['msd_optimizer'])
+    nnx.update(mpd_optimizer, checkpoint_data['mpd_optimizer'])
+    nnx.update(mstftd_optimizer, checkpoint_data['mstftd_optimizer'])
+    
+    step = checkpoint_data['step']
+    print(f"Restored checkpoint from step {step}")
+    return step
+
+
 def train(config: TrainingConfig):
     """Main training loop with data parallel training."""
     
@@ -543,7 +616,18 @@ def train(config: TrainingConfig):
         if step % config.checkpoint_every == 0 and step > 0:
             checkpoint_path = f"{config.checkpoint_dir}/step_{step}"
             print(f"Saving checkpoint to {checkpoint_path}")
-            # TODO: Add checkpoint saving logic using orbax
+            save_checkpoint(
+                checkpoint_path,
+                step,
+                generator,
+                gen_optimizer,
+                msd,
+                mpd,
+                mstftd,
+                msd_optimizer,
+                mpd_optimizer,
+                mstftd_optimizer
+            )
             
     print("Training completed!")
 
