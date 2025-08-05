@@ -215,7 +215,10 @@ def train_discriminator_step(
         
         loss = disc_loss_fn(real_outputs, fake_outputs)
         return loss
-    
+
+    msd.train()
+    mpd.train()
+    mstftd.train()
     # Compute gradients and losses for each discriminator
     msd_loss_val, msd_grads = nnx.value_and_grad(msd_loss_fn)(msd)
     mpd_loss_val, mpd_grads = nnx.value_and_grad(mpd_loss_fn)(mpd)
@@ -402,12 +405,13 @@ def train_generator_step(
             loss_dict["adv_loss"] = adv_loss_val
             
             # Feature matching loss (using all intermediate features)
-            # Get real features (with stop_gradient to prevent discriminator updates)
-            msd_real_features = jax.lax.stop_gradient(msd(audio))
-            mpd_real_features = jax.lax.stop_gradient(mpd(audio))
-            stftd_real_features = jax.lax.stop_gradient(mstftd(audio))
-            
-            # Combine all feature maps
+            msd.eval()
+            mpd.eval()
+            mstftd.eval()
+            msd_real_features = msd(audio)
+            mpd_real_features = mpd(audio)
+            stftd_real_features = mstftd(audio)
+            # concatenate all feature maps, anyway it is element wise...
             real_features = msd_real_features + mpd_real_features + stftd_real_features
             fake_features = msd_fake_features + mpd_fake_features + stftd_fake_features
             
