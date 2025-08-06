@@ -37,11 +37,7 @@ def init_wandb(config: Any, project: str = "speech-tokenizer", run_name: Optiona
         config=config_dict,
         mode="online",  # Force online mode for real-time updates
         reinit=True,
-        settings=wandb.Settings(
-            start_method="thread",
-            _disable_stats=False,  # Enable system metrics
-            _disable_meta=False    # Enable metadata
-        )
+        settings=wandb.Settings()
     )
     
     # Print the run URL immediately

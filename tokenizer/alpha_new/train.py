@@ -622,7 +622,7 @@ def train(config: TrainingConfig):
                 "lsgan"  # Pass as positional argument
             )
             # Average losses across devices
-            disc_losses = jax.tree_map(lambda x: jnp.mean(x).item(), disc_losses)
+            disc_losses = jax.tree.map(lambda x: jnp.mean(x).item(), disc_losses)
             log_discriminator_metrics(disc_losses, step)
         
         # Generator training step
@@ -637,7 +637,7 @@ def train(config: TrainingConfig):
             config  # Pass as positional argument
         )
         # Average losses across devices
-        gen_losses = jax.tree_map(lambda x: jnp.mean(x).item(), gen_losses)
+        gen_losses = jax.tree.map(lambda x: jnp.mean(x).item(), gen_losses)
         log_generator_metrics(gen_losses, step)
         
         # Simple logging
