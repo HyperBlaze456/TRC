@@ -9,6 +9,9 @@ os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_softmax_fusion=true'
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+# Ensure wandb is in online mode for real-time tracking
+os.environ['WANDB_MODE'] = 'online'
+
 # Add project root to path for relative imports
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
@@ -83,6 +86,7 @@ class TrainingConfig:
     # Checkpointing
     checkpoint_dir: str = "./checkpoints/speech_tokenizer"
     checkpoint_every: int = 50 # very small, test
+    log_every: int = 10  # Log metrics every N steps
     
     # RNGs seed
     seed: int = 42
