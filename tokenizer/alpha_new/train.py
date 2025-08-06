@@ -4,12 +4,8 @@ from pathlib import Path
 from dataclasses import dataclass
 from functools import partial
 
-# Suppress XLA compilation warnings
-os.environ['XLA_FLAGS'] = '--xla_gpu_enable_triton_softmax_fusion=true'
 os.environ['XLA_PYTHON_CLIENT_PREALLOCATE'] = 'false'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-# Ensure wandb is in online mode for real-time tracking
 os.environ['WANDB_MODE'] = 'online'
 
 # Add project root to path for relative imports
