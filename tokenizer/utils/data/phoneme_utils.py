@@ -4,8 +4,14 @@ from phonemizer import phonemize
 from phonemizer.backend import EspeakBackend
 from typing import List, Dict, Union, Optional, Tuple
 import warnings
+import unicodedata
+import logging
 
-# Suppress phonemizer warnings
+# Set up logging for debugging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
+
+# Suppress phonemizer warnings that we're handling ourselves
 warnings.filterwarnings("ignore", category=UserWarning, module="phonemizer")
 
 # Comprehensive IPA phoneme inventory - blank token must be first for CTC
@@ -126,6 +132,8 @@ IPA_PHONEMES = [
     "dʑ",
     "tʂ",
     "dʐ",
+    "pf",  # German affricate
+    "ks",  # German x-sound cluster
     # Suprasegmentals
     "ˈ",
     "ˌ",
@@ -187,10 +195,21 @@ IPA_PHONEMES = [
     "ʲ",
     "ʷ",
     "ᵝ",
-    # Other symbols
+    # Diphthongs (especially for German)
+    "aɪ",  # German "ei", "ai"
+    "aʊ",  # German "au"
+    "ɔʏ",  # German "eu", "äu"
+    "ɔɪ",  # Alternative for German "eu"
+    "oʊ",  # English "go"
+    "eɪ",  # English "day"
+    "ɪə",  # English "ear"
+    "eə",  # English "air"
+    "ʊə",  # English "tour"
+    # Other symbols and r-colored vowels
     "ɚ",
     "ɝ",
     "ɫ",
+    "ɐ̯",  # German non-syllabic schwa (r-ending)
     # Separators and special
     " ",
     ".",
@@ -228,10 +247,16 @@ def get_espeak_lang(language: str) -> str:
     return "en-us"
 
 
-def text_to_phonemes(text: str, language: str = "en-us") -> str:
-    """Convert text to IPA phonemes using phonemizer."""
+def text_to_phonemes(text: str, language: str = "en-us", debug: bool = False) -> str:
+    """Convert text to IPA phonemes using phonemizer with better debugging."""
     try:
         espeak_lang = get_espeak_lang(language)
+        
+        if debug:
+            logger.info(f"Phonemizing text in {espeak_lang}: '{text[:50]}...'")
+            # Log character composition
+            for i, char in enumerate(text[:20]):  # Check first 20 chars
+                logger.debug(f"  Char {i}: '{char}' (U+{ord(char):04X}) - {unicodedata.name(char, 'UNKNOWN')}")
 
         phonemes = phonemize(
             text,
@@ -242,16 +267,26 @@ def text_to_phonemes(text: str, language: str = "en-us") -> str:
             with_stress=True,
             language_switch="remove-flags",
         )
+        
+        if debug:
+            logger.info(f"Result phonemes: '{phonemes[:50]}...'")
+            # Check for replacement characters in result
+            for i, char in enumerate(phonemes[:50]):
+                if char == '?':
+                    logger.warning(f"  Replacement character '?' at position {i} - phonemizer couldn't process input")
 
         return phonemes
     except Exception as e:
-        print(f"Error phonemizing text: {e}")
+        logger.error(f"Error phonemizing text in {language}: {e}")
+        logger.error(f"  Text sample: '{text[:100]}...'")
         return ""
 
 
-def phonemes_to_indices(phonemes: str) -> List[int]:
-    """Convert phoneme string to list of indices (no special tokens for CTC)."""
+def phonemes_to_indices(phonemes: str, debug: bool = False) -> List[int]:
+    """Convert phoneme string to list of indices with detailed debugging."""
     indices = []
+    unknown_chars = set()
+    unknown_count = 0
 
     # Handle multi-character phonemes
     i = 0
@@ -268,9 +303,41 @@ def phonemes_to_indices(phonemes: str) -> List[int]:
                     break
 
         if not found:
-            # Skip unknown characters - no UNK token for CTC
-            print(f"Warning: Unknown phoneme character '{phonemes[i]}' - skipping")
+            char = phonemes[i]
+            unknown_chars.add(char)
+            unknown_count += 1
+            
+            # Detailed logging for unknown characters
+            if char == '?':
+                # This is likely a replacement character from phonemizer
+                logger.warning(f"Found '?' at position {i} - this usually means phonemizer couldn't process a character")
+            else:
+                # Log the character details
+                char_info = f"'{char}' (U+{ord(char):04X})"
+                try:
+                    char_name = unicodedata.name(char, 'UNKNOWN')
+                    char_info += f" - {char_name}"
+                except:
+                    pass
+                
+                if debug or unknown_count <= 5:  # Log first 5 unknowns always
+                    logger.warning(f"Unknown phoneme at position {i}: {char_info}")
+                    # Show context
+                    context_start = max(0, i - 5)
+                    context_end = min(len(phonemes), i + 6)
+                    context = phonemes[context_start:context_end]
+                    logger.warning(f"  Context: '{context}' (position {i - context_start} in context)")
+            
             i += 1
+    
+    if unknown_chars:
+        logger.warning(f"Total unknown characters: {unknown_count}")
+        logger.warning(f"Unique unknown characters: {unknown_chars}")
+        for char in unknown_chars:
+            try:
+                logger.warning(f"  - '{char}' (U+{ord(char):04X}) - {unicodedata.name(char, 'UNKNOWN')}")
+            except:
+                logger.warning(f"  - '{char}' (U+{ord(char):04X})")
 
     return indices
 
@@ -321,7 +388,7 @@ def create_phoneme_mask(indices_list: List[List[int]], max_length: int) -> jnp.n
 
 
 def batch_text_to_phoneme_arrays(
-    texts: List[str], languages: List[str]
+    texts: List[str], languages: List[str], debug: bool = False
 ) -> Tuple[jnp.ndarray, jnp.ndarray, List[int]]:
     """Convert batch of texts to phoneme arrays with masks.
 
@@ -337,9 +404,13 @@ def batch_text_to_phoneme_arrays(
     all_indices = []
     lengths = []
 
-    for text, lang in zip(texts, languages):
-        phonemes = text_to_phonemes(text, lang)
-        indices = phonemes_to_indices(phonemes)
+    for idx, (text, lang) in enumerate(zip(texts, languages)):
+        if debug and idx == 0:  # Debug first item in batch
+            logger.info(f"\nProcessing item {idx} in language '{lang}':")
+            logger.info(f"  Original text: '{text[:100]}...'")
+        
+        phonemes = text_to_phonemes(text, lang, debug=(debug and idx == 0))
+        indices = phonemes_to_indices(phonemes, debug=(debug and idx == 0))
         all_indices.append(indices)
         lengths.append(len(indices))
 
