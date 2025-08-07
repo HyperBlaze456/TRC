@@ -41,7 +41,7 @@ def init_wandb(config: Any, project: str = "speech-tokenizer", run_name: Optiona
     )
     
     # Print the run URL immediately
-    print(f"\n🔗 W&B Run URL: {run.get_url()}")
+    print(f"\n🔗 W&B Run URL: {run.url}")
     print(f"   Project: {project}")
     print(f"   Run Name: {run.name}\n")
     

@@ -56,20 +56,20 @@ class TrainingConfig:
     weight_decay: float = 0.01
     
     # Loss weights
-    reconstruction_weight: float = 1.0
-    mel_weight: float = 45.0
-    stft_weight: float = 45.0
-    adversarial_weight: float = 1.0
+    reconstruction_weight: float = 100.0
+    mel_weight: float = 5.0
+    stft_weight: float = 100.0
+    adversarial_weight: float = 2.0
     feature_matching_weight: float = 2.0
     vq_commitment_weight: float = 0.25  # Encoder → VQ codebook
     vq_codebook_weight: float = 1.0      # VQ codebook → Encoder  
     bsq_commitment_weight: float = 0.25  # Residual → BSQ
     bsq_codebook_weight: float = 1.0     # BSQ → Residual
-    phoneme_encoder_weight: float = 2.5   # Phoneme loss → Encoder
-    phoneme_codebook_weight: float = 10.0 # Phoneme loss → VQ codebook
+    phoneme_encoder_weight: float = 1.0   # Phoneme loss → Encoder
+    phoneme_codebook_weight: float = 4.0 # Phoneme loss → VQ codebook
     
     # Discriminator settings
-    disc_start_step: int = 10000
+    disc_start_step: int = 5000
     disc_update_freq: int = 1
     
     # Audio configuration
@@ -80,9 +80,9 @@ class TrainingConfig:
     n_mels: int = 80
     
     # Checkpointing
-    checkpoint_dir: str = "./checkpoints/speech_tokenizer"
-    checkpoint_every: int = 50 # very small, test
-    log_every: int = 10  # Log metrics every N steps
+    checkpoint_dir: str = "./checkpoints/"
+    checkpoint_every: int = 50
+    log_every: int = 10
     
     # RNGs seed
     seed: int = 42
@@ -576,7 +576,7 @@ def train(config: TrainingConfig):
     print(f"Training on {num_devices} devices")
     
     # Initialize wandb
-    wandb_run = init_wandb(config, project="speech-tokenizer")
+    init_wandb(config, project="speech-tokenizer-alpha")
     
     # Initialize RNGs
     key = jax.random.PRNGKey(config.seed)
