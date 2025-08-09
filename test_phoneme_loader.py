@@ -17,7 +17,7 @@ def test_phoneme_loader():
         dataset_name="amphion/Emilia-Dataset",
         split="train",
         sample_rate=24000,
-        batch_size=4,  # Small batch for testing
+        batch_size=32,
         streaming=True,
     )
 
