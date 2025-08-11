@@ -247,17 +247,16 @@ def get_espeak_lang(language: str) -> str:
     return "en-us"
 
 
-def text_to_phonemes(text: str, language: str = "en-us", debug: bool = False) -> str:
-    """Convert text to IPA phonemes using phonemizer with better debugging."""
+def text_to_phonemes(text: str, language: str = "en-us") -> str:
+    """Convert text to IPA phonemes using phonemizer.
+    
+    Args:
+        text: Text to convert to phonemes
+        language: Language code
+    """
     try:
         espeak_lang = get_espeak_lang(language)
         
-        if debug:
-            logger.info(f"Phonemizing text in {espeak_lang}: '{text[:50]}...'")
-            # Log character composition
-            for i, char in enumerate(text[:20]):  # Check first 20 chars
-                logger.debug(f"  Char {i}: '{char}' (U+{ord(char):04X}) - {unicodedata.name(char, 'UNKNOWN')}")
-
         phonemes = phonemize(
             text,
             language=espeak_lang,
@@ -268,13 +267,6 @@ def text_to_phonemes(text: str, language: str = "en-us", debug: bool = False) ->
             language_switch="remove-flags",
         )
         
-        if debug:
-            logger.info(f"Result phonemes: '{phonemes[:50]}...'")
-            # Check for replacement characters in result
-            for i, char in enumerate(phonemes[:50]):
-                if char == '?':
-                    logger.warning(f"  Replacement character '?' at position {i} - phonemizer couldn't process input")
-
         return phonemes
     except Exception as e:
         logger.error(f"Error phonemizing text in {language}: {e}")
@@ -282,11 +274,13 @@ def text_to_phonemes(text: str, language: str = "en-us", debug: bool = False) ->
         return ""
 
 
-def phonemes_to_indices(phonemes: str, debug: bool = False) -> List[int]:
-    """Convert phoneme string to list of indices with detailed debugging."""
+def phonemes_to_indices(phonemes: str) -> List[int]:
+    """Convert phoneme string to list of indices.
+    
+    Args:
+        phonemes: Phoneme string to convert
+    """
     indices = []
-    unknown_chars = set()
-    unknown_count = 0
 
     # Handle multi-character phonemes
     i = 0
@@ -303,41 +297,8 @@ def phonemes_to_indices(phonemes: str, debug: bool = False) -> List[int]:
                     break
 
         if not found:
-            char = phonemes[i]
-            unknown_chars.add(char)
-            unknown_count += 1
-            
-            # Detailed logging for unknown characters
-            if char == '?':
-                # This is likely a replacement character from phonemizer
-                logger.warning(f"Found '?' at position {i} - this usually means phonemizer couldn't process a character")
-            else:
-                # Log the character details
-                char_info = f"'{char}' (U+{ord(char):04X})"
-                try:
-                    char_name = unicodedata.name(char, 'UNKNOWN')
-                    char_info += f" - {char_name}"
-                except:
-                    pass
-                
-                if debug or unknown_count <= 5:  # Log first 5 unknowns always
-                    logger.warning(f"Unknown phoneme at position {i}: {char_info}")
-                    # Show context
-                    context_start = max(0, i - 5)
-                    context_end = min(len(phonemes), i + 6)
-                    context = phonemes[context_start:context_end]
-                    logger.warning(f"  Context: '{context}' (position {i - context_start} in context)")
-            
+            indices.append(0) # <blank>
             i += 1
-    
-    if unknown_chars:
-        logger.warning(f"Total unknown characters: {unknown_count}")
-        logger.warning(f"Unique unknown characters: {unknown_chars}")
-        for char in unknown_chars:
-            try:
-                logger.warning(f"  - '{char}' (U+{ord(char):04X}) - {unicodedata.name(char, 'UNKNOWN')}")
-            except:
-                logger.warning(f"  - '{char}' (U+{ord(char):04X})")
 
     return indices
 
@@ -352,6 +313,61 @@ def indices_to_phonemes(indices: List[int]) -> str:
             if phoneme != "<blank>":
                 phonemes.append(phoneme)
     return "".join(phonemes)
+
+
+def batch_text_to_phonemes(texts: List[str], languages: List[str]) -> List[str]:
+    """Convert batch of texts to phonemes efficiently using phonemizer's batch processing.
+    
+    Groups texts by language and processes each group in batch for optimal performance.
+    
+    Args:
+        texts: List of text strings to convert
+        languages: List of language codes corresponding to each text
+        
+    Returns:
+        List of phoneme strings in the same order as input texts
+    """
+    if not texts:
+        return []
+    
+    # Group texts by language with their original indices
+    language_groups = {}
+    for idx, (text, lang) in enumerate(zip(texts, languages)):
+        espeak_lang = get_espeak_lang(lang)
+        if espeak_lang not in language_groups:
+            language_groups[espeak_lang] = []
+        language_groups[espeak_lang].append((idx, text))
+    
+    # Prepare result list
+    all_phonemes = [None] * len(texts)
+
+    # Process each language group in batch
+    for espeak_lang, items in language_groups.items():
+        indices, batch_texts = zip(*items)
+        
+        try:
+            # Process entire batch at once
+            batch_phonemes = phonemize(
+                list(batch_texts),  # Convert tuple to list
+                language=espeak_lang,
+                backend="espeak",
+                strip=True,
+                preserve_punctuation=False,
+                with_stress=True,
+                language_switch="remove-flags",
+            )
+            
+            # Place results back in correct positions
+            for idx, phonemes in zip(indices, batch_phonemes):
+                all_phonemes[idx] = phonemes
+                
+        except Exception as e:
+            logger.error(f"Error batch phonemizing texts in {espeak_lang}: {e}")
+            # Fallback to empty strings for this batch
+            for idx in indices:
+                all_phonemes[idx] = ""
+    
+    return all_phonemes
 
 
 def create_phoneme_array(
@@ -388,7 +404,7 @@ def create_phoneme_mask(indices_list: List[List[int]], max_length: int) -> jnp.n
 
 
 def batch_text_to_phoneme_arrays(
-    texts: List[str], languages: List[str], debug: bool = False
+    texts: List[str], languages: List[str]
 ) -> Tuple[jnp.ndarray, jnp.ndarray, List[int]]:
     """Convert batch of texts to phoneme arrays with masks.
 
@@ -401,16 +417,14 @@ def batch_text_to_phoneme_arrays(
         phoneme_mask: JAX array of shape [B, L] with CTC padding (1.0 = padded, 0.0 = valid)
         lengths: List of actual sequence lengths
     """
+    # Use efficient batch processing
+    phonemes_list = batch_text_to_phonemes(texts, languages)
+    
+    # Convert phonemes to indices
     all_indices = []
     lengths = []
-
-    for idx, (text, lang) in enumerate(zip(texts, languages)):
-        if debug and idx == 0:  # Debug first item in batch
-            logger.info(f"\nProcessing item {idx} in language '{lang}':")
-            logger.info(f"  Original text: '{text[:100]}...'")
-        
-        phonemes = text_to_phonemes(text, lang, debug=(debug and idx == 0))
-        indices = phonemes_to_indices(phonemes, debug=(debug and idx == 0))
+    for phonemes in phonemes_list:
+        indices = phonemes_to_indices(phonemes)
         all_indices.append(indices)
         lengths.append(len(indices))
 
